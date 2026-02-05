@@ -35,13 +35,12 @@ from src.utils.io_utils import (
     save_dataframe,
     save_receipt,
 )
-from src.utils.http_utils import (
+from src.utils.http import (
     APIError,
     APIKeyMissingError,
-    EmptyResponseError,
     create_session,
     make_request,
-    paginated_fetch,
+    fetch_all_records,
 )
 from src.utils.logging_utils import (
     ProgressLogger,

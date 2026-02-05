@@ -40,7 +40,7 @@ def load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
 
 def load_locations(locations_path: Union[str, Path]) -> pd.DataFrame:
     """
-    Load locations CSV file.
+    Load locations CSV file with comment handling.
     
     Args:
         locations_path: Path to locations CSV
@@ -48,17 +48,25 @@ def load_locations(locations_path: Union[str, Path]) -> pd.DataFrame:
     Returns:
         DataFrame with location data
         
+    Note:
+        Supports comment lines starting with '#' and skips blank lines.
+        
     Example:
-        >>> locations = load_locations("configs/locations.csv")
+        >>> locations = load_locations("configs/maharashtra_locations.csv")
         >>> for _, loc in locations.iterrows():
-        ...     print(loc["location_name"], loc["latitude"], loc["longitude"])
+        ...     print(loc["district"], loc["latitude"], loc["longitude"])
     """
     locations_path = Path(locations_path)
     
     if not locations_path.exists():
         raise FileNotFoundError(f"Locations file not found: {locations_path}")
     
-    return pd.read_csv(locations_path)
+    return pd.read_csv(
+        locations_path,
+        comment="#",
+        skip_blank_lines=True,
+        encoding="utf-8",
+    )
 
 
 def ensure_directory(path: Union[str, Path]) -> Path:
@@ -252,6 +260,10 @@ def save_receipt(
     return output_path
 
 
+# Import redact function from http module (single source of truth)
+from src.utils.http import redact_params as redact_sensitive_params
+
+
 def create_download_receipt(
     dataset_id: str,
     source: str,
@@ -261,6 +273,7 @@ def create_download_receipt(
     total_pages: int,
     output_file: str,
     metadata: Optional[Dict[str, Any]] = None,
+    duration_seconds: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Create a standardized download receipt dictionary.
@@ -269,21 +282,25 @@ def create_download_receipt(
         dataset_id: Identifier for the dataset
         source: Data source name (e.g., "data.gov.in", "NASA POWER")
         filters: Applied filters
-        url_params: URL parameters used
+        url_params: URL parameters used (API keys will be REDACTED)
         total_rows: Number of rows downloaded
         total_pages: Number of pages fetched
         output_file: Path to output data file
         metadata: Additional metadata from API response
+        duration_seconds: Download duration in seconds
         
     Returns:
         Receipt dictionary ready for JSON serialization
+        
+    Note:
+        API keys and other sensitive parameters are automatically redacted.
     """
     receipt = {
         "download_timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "dataset_id": dataset_id,
         "source": source,
-        "filters": filters,
-        "url_params": {k: v for k, v in url_params.items() if "key" not in k.lower()},  # Exclude API keys
+        "filters": redact_sensitive_params(filters),
+        "url_params": redact_sensitive_params(url_params),
         "statistics": {
             "total_rows": total_rows,
             "total_pages": total_pages,
@@ -291,8 +308,15 @@ def create_download_receipt(
         "output_file": str(output_file),
     }
     
+    if duration_seconds is not None:
+        receipt["statistics"]["duration_seconds"] = round(duration_seconds, 2)
+    
     if metadata:
-        receipt["api_metadata"] = metadata
+        # Redact any sensitive data in metadata too
+        if isinstance(metadata, dict):
+            receipt["api_metadata"] = redact_sensitive_params(metadata)
+        else:
+            receipt["api_metadata"] = metadata
     
     return receipt
 

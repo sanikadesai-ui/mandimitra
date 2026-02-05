@@ -1,39 +1,42 @@
 #!/usr/bin/env python3
 """
-MANDIMITRA - Maharashtra Mandi Metadata Discovery Script
+MANDIMITRA - Maharashtra Mandi Metadata Discovery Script (Production-Grade)
 
-Discovers and saves unique values for Maharashtra mandi data:
-- Districts
-- Markets
-- Commodities
+Discovers unique districts, markets, and commodities for Maharashtra with:
+- CONSTANT MEMORY: Streams records, never stores all in memory
+- Fast mode (--discover-fast): Limited pages for quick discovery
+- Full mode (--discover-full): All pages, still constant memory
+- Field filtering: Only requests needed fields to reduce payload
 
-This MUST be run before full data download to understand coverage.
+⚠️  HARD CONSTRAINT: Maharashtra-only data.
 
 Usage:
-    python scripts/discover_maharashtra_mandi_metadata.py
-    python scripts/discover_maharashtra_mandi_metadata.py --verbose
+    python scripts/discover_maharashtra_mandi_metadata.py --discover-fast
+    python scripts/discover_maharashtra_mandi_metadata.py --discover-full
     python scripts/discover_maharashtra_mandi_metadata.py --help
 
 Output:
     data/metadata/maharashtra/districts.csv
-    data/metadata/maharashtra/markets.csv
+    data/metadata/maharashtra/markets.csv  
     data/metadata/maharashtra/commodities.csv
     data/metadata/maharashtra/discovery_receipt.json
 
 Author: MANDIMITRA Team
+Version: 2.0.0 (Production Refactor)
 """
 
 import argparse
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, Optional, Set
 
 import pandas as pd
 from dotenv import load_dotenv
 
-# Add project root to path for imports
+# Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -41,246 +44,271 @@ from src.utils.io_utils import (
     ensure_directory,
     load_config,
     save_receipt,
+    redact_sensitive_params,
 )
-from src.utils.http_utils import (
+from src.utils.http import (
     APIError,
     APIKeyMissingError,
+    RateLimitMode,
+    AdaptiveRateLimiter,
     create_session,
-    make_request,
+    fetch_total_count,
+    stream_paginated_records,
+    redact_params,
 )
-from src.utils.logging_utils import (
-    ProgressLogger,
-    get_utc_timestamp,
-    get_utc_timestamp_safe,
-    setup_logger,
-)
+from src.utils.logging_utils import setup_logger, get_utc_timestamp_safe
 from src.utils.maharashtra import (
     MAHARASHTRA_STATE_NAME,
     is_maharashtra_state,
+    build_maharashtra_api_filters,
 )
 from src.utils.audit import AuditLogger
 
 
+# =============================================================================
+# CLI
+# =============================================================================
+
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Discover Maharashtra mandi metadata (districts, markets, commodities)",
+        description="Discover Maharashtra mandi metadata (memory-safe streaming)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-This script queries the Data.gov.in API to discover all unique values for:
-  - Districts in Maharashtra
-  - Markets (mandis) in Maharashtra  
-  - Commodities available in Maharashtra
+DISCOVERY MODES:
+  --discover-fast    Quick discovery (max 50 pages, ~50K records)
+                     Good for development and testing
+  --discover-full    Full discovery (all pages, constant memory)
+                     Required for production completeness
 
-The discovered metadata is saved to data/metadata/maharashtra/ and used
-by the main download script to plan efficient data downloads.
-
-IMPORTANT: This script ONLY queries Maharashtra data. It is a HARD CONSTRAINT
-that no other state's data will ever be downloaded or processed.
+MEMORY SAFETY:
+  This script uses STREAMING to maintain constant memory regardless of
+  dataset size. Records are processed one-at-a-time; only unique values
+  are stored (districts, markets, commodities as sets).
 
 Examples:
-    # Run discovery
-    python scripts/discover_maharashtra_mandi_metadata.py
+    # Quick discovery (dev/testing)
+    python scripts/discover_maharashtra_mandi_metadata.py --discover-fast
     
-    # Run with verbose output
-    python scripts/discover_maharashtra_mandi_metadata.py --verbose
+    # Full discovery (production)
+    python scripts/discover_maharashtra_mandi_metadata.py --discover-full
     
-    # Force refresh even if metadata exists
-    python scripts/discover_maharashtra_mandi_metadata.py --force
+    # Custom limits
+    python scripts/discover_maharashtra_mandi_metadata.py --max-pages 100 --max-records 100000
         """,
     )
     
+    # Discovery mode
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument(
+        "--discover-fast",
+        action="store_true",
+        help="Quick discovery with limited pages (for dev/testing)",
+    )
+    mode_group.add_argument(
+        "--discover-full",
+        action="store_true", 
+        help="Full discovery of all pages (constant memory)",
+    )
+    mode_group.add_argument(
+        "--max-pages",
+        type=int,
+        metavar="N",
+        help="Custom max pages to fetch",
+    )
+    
+    # Optional limits
+    parser.add_argument(
+        "--max-records",
+        type=int,
+        default=None,
+        help="Maximum records to process (early stop)",
+    )
+    parser.add_argument(
+        "--page-size",
+        type=int,
+        default=1000,
+        help="Records per API page (default: 1000)",
+    )
+    
+    # Config
     parser.add_argument(
         "--config",
         type=str,
         default="configs/project.yaml",
-        help="Path to project configuration file",
+        help="Path to project configuration",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
         default="data/metadata/maharashtra",
-        help="Output directory for metadata files",
+        help="Output directory for metadata",
     )
+    
+    # Options
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Force refresh even if metadata already exists",
+        help="Force refresh even if metadata exists",
     )
     parser.add_argument(
-        "--verbose",
-        "-v",
+        "--rate-limit",
+        type=str,
+        choices=["auto", "fixed", "disabled"],
+        default="auto",
+        help="Rate limiting mode (default: auto)",
+    )
+    parser.add_argument(
+        "--verbose", "-v",
         action="store_true",
-        help="Enable verbose debug output",
+        help="Enable verbose output",
     )
     
     return parser.parse_args()
 
 
+# =============================================================================
+# HELPERS
+# =============================================================================
+
 def get_api_key() -> str:
-    """
-    Get Data.gov.in API key from environment.
-    
-    Returns:
-        API key string
-        
-    Raises:
-        APIKeyMissingError: If API key not found
-    """
+    """Get API key from environment (never log/store the actual key)."""
     load_dotenv(PROJECT_ROOT / ".env")
     
     api_key = os.getenv("DATAGOV_API_KEY")
     
     if not api_key:
         raise APIKeyMissingError(
-            "DATAGOV_API_KEY not found in environment.\n"
-            "Please set it in your .env file:\n"
-            "  1. Copy .env.example to .env\n"
-            "  2. Add your API key from https://data.gov.in/user/register"
+            "DATAGOV_API_KEY not found.\n"
+            "Set it in your .env file (see .env.example)"
         )
     
     if api_key == "your_api_key_here":
         raise APIKeyMissingError(
-            "DATAGOV_API_KEY is set to placeholder value.\n"
-            "Please update your .env file with a valid API key."
+            "DATAGOV_API_KEY is still placeholder.\n"
+            "Update .env with your actual key from https://data.gov.in"
         )
     
     return api_key
 
 
-def fetch_maharashtra_total_count(
-    session,
-    api_url: str,
-    api_key: str,
-    logger,
-) -> int:
-    """
-    Fetch total count of Maharashtra records.
+def build_maharashtra_params(api_key: str, page_size: int) -> Dict[str, Any]:
+    """Build base params with HARDCODED Maharashtra filter.
     
-    Args:
-        session: HTTP session
-        api_url: API endpoint
-        api_key: API key
-        logger: Logger instance
-        
-    Returns:
-        Total record count
+    Uses `filters[state.keyword]` for EXACT matching (not fuzzy).
+    This is critical - using `filters[state]` does fuzzy matching
+    and can return non-Maharashtra records.
     """
     params = {
         "api-key": api_key,
         "format": "json",
-        "limit": 1,
-        "offset": 0,
-        f"filters[state]": MAHARASHTRA_STATE_NAME,
+        "limit": page_size,
     }
-    
-    logger.info(f"Fetching total count for {MAHARASHTRA_STATE_NAME}...")
-    data, _ = make_request(session, api_url, params=params, logger=logger)
-    
-    total = data.get("total", 0)
-    logger.info(f"Total Maharashtra records available: {total:,}")
-    
-    return total
+    params.update(build_maharashtra_api_filters())
+    return params
 
 
-def discover_unique_values(
+# =============================================================================
+# STREAMING DISCOVERY (Constant Memory)
+# =============================================================================
+
+def discover_metadata_streaming(
     session,
     api_url: str,
     api_key: str,
     page_size: int,
+    max_pages: Optional[int],
+    max_records: Optional[int],
+    rate_limiter: AdaptiveRateLimiter,
     logger,
-) -> Dict[str, Set[str]]:
+) -> Dict[str, Any]:
     """
-    Discover unique districts, markets, and commodities for Maharashtra.
+    Discover unique values using STREAMING (constant memory).
     
-    This fetches all Maharashtra records and extracts unique values.
-    For large datasets, this uses sampling to be efficient.
+    This function NEVER stores all records in memory. It processes
+    records one-at-a-time, updating only the unique value sets.
     
-    Args:
-        session: HTTP session
-        api_url: API endpoint
-        api_key: API key
-        page_size: Records per page
-        logger: Logger instance
-        
-    Returns:
-        Dictionary with sets of unique values
+    Memory usage: O(unique_districts + unique_markets + unique_commodities)
+    NOT: O(total_records)
     """
+    start_time = time.time()
+    
+    # Only store unique values (sets have constant-ish memory for unique values)
     districts: Set[str] = set()
     markets: Set[str] = set()
     commodities: Set[str] = set()
-    non_mh_count = 0
+    
+    # Counters (constant memory)
     total_processed = 0
+    non_mh_dropped = 0
+    pages_fetched = 0
     
-    offset = 0
-    page = 1
+    # Build params
+    base_params = build_maharashtra_params(api_key, page_size)
     
-    # First, get total count
-    total = fetch_maharashtra_total_count(session, api_url, api_key, logger)
+    # Get total count first (single lightweight request)
+    total_available = fetch_total_count(
+        session, api_url, base_params, 
+        logger=logger, rate_limiter=rate_limiter
+    )
+    logger.info(f"Total Maharashtra records available: {total_available:,}")
     
-    if total == 0:
-        raise APIError("No Maharashtra records found. Check API filters.")
+    if total_available == 0:
+        raise APIError("No Maharashtra records found. Check API/filters.")
     
-    logger.info("Fetching all Maharashtra records to discover unique values...")
-    logger.info(f"This may take a while for {total:,} records...")
+    # Progress callback
+    def on_page(records, page_num, fetched_so_far):
+        nonlocal pages_fetched
+        pages_fetched = page_num
+        if page_num % 10 == 0 or page_num == 1:
+            logger.info(
+                f"  Page {page_num}: {fetched_so_far:,} records | "
+                f"Districts: {len(districts)} | Markets: {len(markets)} | "
+                f"Commodities: {len(commodities)}"
+            )
     
-    with ProgressLogger(logger, "Discovering Maharashtra metadata") as progress:
-        while True:
-            params = {
-                "api-key": api_key,
-                "format": "json",
-                "limit": page_size,
-                "offset": offset,
-                f"filters[state]": MAHARASHTRA_STATE_NAME,
-            }
-            
-            try:
-                data, _ = make_request(session, api_url, params=params, logger=logger)
-            except Exception as e:
-                logger.error(f"Error fetching page {page}: {e}")
-                break
-            
-            records = data.get("records", [])
-            
-            if not records:
-                break
-            
-            for record in records:
-                # HARD CONSTRAINT: Verify Maharashtra
-                state = record.get("state", "")
-                if not is_maharashtra_state(state):
-                    non_mh_count += 1
-                    logger.warning(f"Non-Maharashtra record found: state='{state}' - DROPPING")
-                    continue
-                
-                # Extract unique values
-                if record.get("district"):
-                    districts.add(record["district"].strip())
-                if record.get("market"):
-                    markets.add(record["market"].strip())
-                if record.get("commodity"):
-                    commodities.add(record["commodity"].strip())
-                
-                total_processed += 1
-            
-            progress.update(f"Page {page}: {len(records)} records | Districts: {len(districts)} | Markets: {len(markets)} | Commodities: {len(commodities)}")
-            
-            # Check if we've fetched all
-            if len(records) < page_size or (offset + page_size) >= total:
-                break
-            
-            offset += page_size
-            page += 1
-            
-            # Rate limiting
-            import time
-            time.sleep(0.5)
+    logger.info("Streaming records (constant memory)...")
     
-    if non_mh_count > 0:
-        logger.error(f"HARD CONSTRAINT CHECK: {non_mh_count} non-Maharashtra records were dropped!")
+    # Stream records one-at-a-time
+    for record in stream_paginated_records(
+        session=session,
+        url=api_url,
+        base_params=base_params,
+        page_size=page_size,
+        max_pages=max_pages,
+        max_records=max_records,
+        logger=None,  # Use callback instead
+        rate_limiter=rate_limiter,
+        on_page_callback=on_page,
+    ):
+        # Verify Maharashtra (API filter should handle this, but verify)
+        state = record.get("state", "")
+        if not is_maharashtra_state(state):
+            non_mh_dropped += 1
+            continue
+        
+        # Extract unique values (constant memory per unique value)
+        if record.get("district"):
+            districts.add(record["district"].strip())
+        if record.get("market"):
+            markets.add(record["market"].strip())
+        if record.get("commodity"):
+            commodities.add(record["commodity"].strip())
+        
+        total_processed += 1
     
-    logger.info(f"Discovery complete:")
-    logger.info(f"  Total records processed: {total_processed:,}")
+    duration = time.time() - start_time
+    
+    # Log summary (not per-record)
+    if non_mh_dropped > 0:
+        logger.warning(
+            f"Non-MH records dropped: {non_mh_dropped} "
+            "(API filter may have returned cross-state data)"
+        )
+    
+    logger.info(f"Discovery complete in {duration:.1f}s:")
+    logger.info(f"  Records processed: {total_processed:,}")
+    logger.info(f"  Pages fetched: {pages_fetched}")
     logger.info(f"  Unique districts: {len(districts)}")
     logger.info(f"  Unique markets: {len(markets)}")
     logger.info(f"  Unique commodities: {len(commodities)}")
@@ -290,17 +318,15 @@ def discover_unique_values(
         "markets": markets,
         "commodities": commodities,
         "total_processed": total_processed,
-        "non_mh_dropped": non_mh_count,
+        "total_available": total_available,
+        "non_mh_dropped": non_mh_dropped,
+        "pages_fetched": pages_fetched,
+        "duration_seconds": duration,
     }
 
 
-def save_metadata_csv(
-    values: Set[str],
-    output_path: Path,
-    column_name: str,
-    logger,
-) -> int:
-    """Save unique values as CSV."""
+def save_metadata_csv(values: Set[str], output_path: Path, column_name: str, logger) -> int:
+    """Save unique values as sorted CSV."""
     sorted_values = sorted(list(values))
     df = pd.DataFrame({column_name: sorted_values})
     df.to_csv(output_path, index=False, encoding="utf-8")
@@ -308,110 +334,129 @@ def save_metadata_csv(
     return len(sorted_values)
 
 
+# =============================================================================
+# MAIN
+# =============================================================================
+
 def main():
-    """Main entry point for metadata discovery."""
+    """Main entry point."""
     args = parse_arguments()
+    
+    # Determine max_pages based on mode
+    if args.discover_fast:
+        max_pages = 50  # ~50K records, enough for quick lists
+    elif args.discover_full:
+        max_pages = None  # No limit
+    else:
+        max_pages = args.max_pages
     
     # Setup logging
     log_level = "DEBUG" if args.verbose else "INFO"
-    log_file = PROJECT_ROOT / "logs" / "download.log"
+    log_file = PROJECT_ROOT / "logs" / "discovery.log"
     logger = setup_logger("mh_discovery", log_file, level=log_level)
     
-    # Initialize audit logger
+    # Audit
     timestamp = get_utc_timestamp_safe()
     audit = AuditLogger("discovery", PROJECT_ROOT / "logs", timestamp)
     
     logger.info("=" * 70)
-    logger.info("MANDIMITRA - Maharashtra Mandi Metadata Discovery")
-    logger.info("⚠️  HARD CONSTRAINT: Maharashtra-only data")
+    logger.info("MANDIMITRA - Maharashtra Metadata Discovery")
+    logger.info("Mode: STREAMING (constant memory)")
+    logger.info(f"Max pages: {max_pages or 'unlimited'}")
     logger.info("=" * 70)
     
     try:
-        # Load configuration
-        config_path = PROJECT_ROOT / args.config
-        config = load_config(config_path)
-        logger.info(f"Loaded configuration from {config_path}")
+        # Load config
+        config = load_config(PROJECT_ROOT / args.config)
         
-        # Check if metadata already exists
+        # Check if metadata exists
         output_dir = PROJECT_ROOT / args.output_dir
         districts_file = output_dir / "districts.csv"
         markets_file = output_dir / "markets.csv"
         commodities_file = output_dir / "commodities.csv"
         
         if not args.force and all(f.exists() for f in [districts_file, markets_file, commodities_file]):
-            logger.info("Metadata files already exist. Use --force to refresh.")
+            logger.info("Metadata already exists. Use --force to refresh.")
             
-            # Load and display existing metadata
-            districts_df = pd.read_csv(districts_file)
-            markets_df = pd.read_csv(markets_file)
-            commodities_df = pd.read_csv(commodities_file)
+            # Show existing counts
+            d_count = len(pd.read_csv(districts_file, comment="#"))
+            m_count = len(pd.read_csv(markets_file, comment="#"))
+            c_count = len(pd.read_csv(commodities_file, comment="#"))
             
             print(f"\n📊 Existing Maharashtra Metadata:")
-            print(f"   Districts: {len(districts_df)}")
-            print(f"   Markets: {len(markets_df)}")
-            print(f"   Commodities: {len(commodities_df)}")
-            print(f"\nUse --force to refresh metadata from API.")
+            print(f"   Districts: {d_count}")
+            print(f"   Markets: {m_count}")
+            print(f"   Commodities: {c_count}")
+            print(f"\nUse --force to refresh.")
             return 0
         
         # Get API key
         api_key = get_api_key()
-        logger.info("API key loaded successfully")
+        logger.info("API key loaded ✓")
         
         # Build API URL
         mandi_config = config["mandi"]
         resource_id = mandi_config["resource_id"]
         api_url = f"{mandi_config['api_base']}/{resource_id}"
         
-        audit.add_section("API Configuration", {
+        audit.add_section("Configuration", {
             "endpoint": api_url,
             "resource_id": resource_id,
             "state_filter": MAHARASHTRA_STATE_NAME,
-            "page_size": mandi_config["page_size"],
+            "max_pages": max_pages or "unlimited",
+            "page_size": args.page_size,
         })
         
-        # Create HTTP session
+        # Create session with pooling
         http_config = config["http"]
         session = create_session(
             max_retries=http_config["max_retries"],
             backoff_factor=http_config["backoff_factor"],
             retry_status_codes=http_config["retry_status_codes"],
             timeout=http_config["timeout"],
+            pool_connections=5,
+            pool_maxsize=10,
         )
         
-        # Discover unique values
-        results = discover_unique_values(
+        # Setup rate limiter
+        rate_mode = RateLimitMode(args.rate_limit)
+        rate_limiter = AdaptiveRateLimiter(mode=rate_mode, base_delay=0.5)
+        
+        # Run streaming discovery
+        results = discover_metadata_streaming(
             session=session,
             api_url=api_url,
             api_key=api_key,
-            page_size=mandi_config["page_size"],
+            page_size=args.page_size,
+            max_pages=max_pages,
+            max_records=args.max_records,
+            rate_limiter=rate_limiter,
             logger=logger,
         )
         
-        # Save metadata CSVs
+        # Save CSVs
         ensure_directory(output_dir)
         
-        district_count = save_metadata_csv(
-            results["districts"], districts_file, "district", logger
-        )
-        market_count = save_metadata_csv(
-            results["markets"], markets_file, "market", logger
-        )
-        commodity_count = save_metadata_csv(
-            results["commodities"], commodities_file, "commodity", logger
-        )
+        d_count = save_metadata_csv(results["districts"], districts_file, "district", logger)
+        m_count = save_metadata_csv(results["markets"], markets_file, "market", logger)
+        c_count = save_metadata_csv(results["commodities"], commodities_file, "commodity", logger)
         
-        # Create receipt
+        # Create receipt (API key redacted)
         receipt = {
             "discovery_timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "state": MAHARASHTRA_STATE_NAME,
             "api_endpoint": api_url,
             "resource_id": resource_id,
+            "mode": "fast" if args.discover_fast else "full",
             "statistics": {
-                "total_records_processed": results["total_processed"],
-                "non_maharashtra_dropped": results["non_mh_dropped"],
-                "unique_districts": district_count,
-                "unique_markets": market_count,
-                "unique_commodities": commodity_count,
+                "total_available": results["total_available"],
+                "total_processed": results["total_processed"],
+                "pages_fetched": results["pages_fetched"],
+                "non_mh_dropped": results["non_mh_dropped"],
+                "unique_districts": d_count,
+                "unique_markets": m_count,
+                "unique_commodities": c_count,
+                "duration_seconds": round(results["duration_seconds"], 2),
             },
             "output_files": {
                 "districts": str(districts_file.relative_to(PROJECT_ROOT)),
@@ -422,50 +467,27 @@ def main():
         
         receipt_path = output_dir / "discovery_receipt.json"
         save_receipt(receipt_path, receipt)
-        logger.info(f"Saved receipt to {receipt_path}")
         
-        # Update audit
-        audit.add_metric("Total Records Processed", results["total_processed"])
-        audit.add_metric("Non-MH Records Dropped", results["non_mh_dropped"])
-        audit.add_metric("Unique Districts", district_count)
-        audit.add_metric("Unique Markets", market_count)
-        audit.add_metric("Unique Commodities", commodity_count)
-        
-        audit.add_section("Discovered Districts", {
-            "count": district_count,
-            "list": sorted(list(results["districts"]))[:20],
-        })
-        
-        audit.add_section("Output Files", {
-            "districts": str(districts_file),
-            "markets": str(markets_file),
-            "commodities": str(commodities_file),
-            "receipt": str(receipt_path),
-        })
+        # Audit metrics
+        audit.add_metric("Records Processed", results["total_processed"])
+        audit.add_metric("Pages Fetched", results["pages_fetched"])
+        audit.add_metric("Non-MH Dropped", results["non_mh_dropped"])
+        audit.add_metric("Unique Districts", d_count)
+        audit.add_metric("Unique Markets", m_count)
+        audit.add_metric("Unique Commodities", c_count)
+        audit.add_metric("Duration (seconds)", round(results["duration_seconds"], 2))
         
         if results["non_mh_dropped"] > 0:
-            audit.add_warning(
-                f"{results['non_mh_dropped']} non-Maharashtra records were found and dropped"
-            )
+            audit.add_warning(f"{results['non_mh_dropped']} non-MH records dropped")
         
-        # Save audit
         audit_path = audit.save()
-        logger.info(f"Saved audit report to {audit_path}")
         
         # Summary
-        logger.info("=" * 70)
-        logger.info("✅ Discovery Complete!")
-        logger.info(f"   State: {MAHARASHTRA_STATE_NAME}")
-        logger.info(f"   Districts: {district_count}")
-        logger.info(f"   Markets: {market_count}")
-        logger.info(f"   Commodities: {commodity_count}")
-        logger.info(f"   Output: {output_dir}")
-        logger.info("=" * 70)
-        
         print(f"\n✅ Maharashtra Metadata Discovery Complete!")
-        print(f"   📍 Districts: {district_count}")
-        print(f"   🏪 Markets: {market_count}")
-        print(f"   🌾 Commodities: {commodity_count}")
+        print(f"   📍 Districts: {d_count}")
+        print(f"   🏪 Markets: {m_count}")
+        print(f"   🌾 Commodities: {c_count}")
+        print(f"   ⏱️  Duration: {results['duration_seconds']:.1f}s")
         print(f"\n   📁 Output: {output_dir}")
         print(f"   📋 Audit: {audit_path}")
         
@@ -475,7 +497,7 @@ def main():
         logger.error(f"API Key Error: {e}")
         audit.add_error(str(e))
         audit.save()
-        print(f"\n❌ API Key Error: {e}")
+        print(f"\n❌ {e}")
         return 1
         
     except APIError as e:
@@ -489,7 +511,7 @@ def main():
         logger.exception(f"Unexpected error: {e}")
         audit.add_error(str(e))
         audit.save()
-        print(f"\n❌ Unexpected error: {e}")
+        print(f"\n❌ Error: {e}")
         return 99
 
 

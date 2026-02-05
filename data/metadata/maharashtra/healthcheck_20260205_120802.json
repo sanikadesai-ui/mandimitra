@@ -1,0 +1,20 @@
+{
+  "success": true,
+  "timestamp_utc": "2026-02-05T12:08:00.345609+00:00",
+  "url_redacted": "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=%5BREDACTED%5D",
+  "params_redacted": {
+    "api-key": "[REDACTED]",
+    "format": "json",
+    "limit": 5,
+    "offset": 0,
+    "filters[state.keyword]": "[REDACTED]"
+  },
+  "status_code": 200,
+  "total_records": 227,
+  "first_record_state": "Maharashtra",
+  "sample_districts": [
+    "Mumbai"
+  ],
+  "latency_ms": 2631.246328353882,
+  "error_message": null
+}

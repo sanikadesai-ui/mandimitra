@@ -33,11 +33,14 @@ MANDIMITRA is a robust data engineering pipeline that downloads, validates, and 
 ### Key Features
 
 - ✅ **Maharashtra-Only**: Hard constraint - no other state data allowed
-- ✅ **Resumable**: Chunked downloads with progress tracking (progress.json)
-- ✅ **Discovery Mode**: Query unique districts/markets/commodities before download
+- ✅ **Resumable**: Chunked downloads with atomic progress tracking
+- ✅ **Discovery Mode**: Memory-safe streaming discovery (constant memory)
+- ✅ **Parallel Downloads**: ThreadPoolExecutor with configurable workers
+- ✅ **Adaptive Rate Limiting**: Token bucket algorithm with 429 handling
 - ✅ **Validated**: Pandera schemas with strict Maharashtra checks
 - ✅ **Audited**: Markdown audit reports for compliance tracking
-- ✅ **Secure**: No hardcoded secrets; uses `.env` for API keys
+- ✅ **Secure**: No hardcoded secrets; API keys redacted in receipts
+- ✅ **Self-Check**: Validation script to verify production standards
 
 ---
 
@@ -77,18 +80,78 @@ copy .env.example .env  # Windows
 ### 4. Recommended Workflow
 
 ```bash
-# STEP 1: Discover Maharashtra metadata (districts, markets, commodities)
-python scripts/discover_maharashtra_mandi_metadata.py
+# STEP 0: Run API self-check to verify connectivity and filters
+python scripts/self_check_datagov.py --verbose
 
-# STEP 2: Download Maharashtra mandi prices
-python scripts/download_mandi_maharashtra.py --download-all
+# STEP 1: Run self-check to validate codebase
+python scripts/self_check.py --verbose
 
-# STEP 3: Download weather data for all 36 district HQs
-python scripts/download_weather_maharashtra.py --all
+# STEP 2: Discover Maharashtra metadata (streaming - constant memory)
+python scripts/discover_maharashtra_mandi_metadata.py --discover-fast
 
-# STEP 4: Validate all downloaded data
+# STEP 3: Download Maharashtra mandi prices (parallel)
+python scripts/download_mandi_maharashtra.py --download-all --max-workers 4
+
+# STEP 4: Download weather data for all 36 district HQs (parallel)
+python scripts/download_weather_maharashtra.py --all --all-districts --max-workers 2
+
+# STEP 5: Validate all downloaded data
 python scripts/validate_data.py --all-recent --strict --audit
 ```
+
+---
+
+## 🔧 Critical Technical Notes
+
+### Data.gov.in API Filter Syntax
+
+**CRITICAL**: The Data.gov.in API requires `filters[field.keyword]` for **exact matching**.
+
+```bash
+# ❌ WRONG - fuzzy matching (may return non-Maharashtra data)
+?filters[state]=Maharashtra
+
+# ✅ CORRECT - exact matching (Maharashtra only)
+?filters[state.keyword]=Maharashtra
+```
+
+The `filters[field]` syntax does fuzzy/partial matching which can return records from
+other states (e.g., "Madhya Pradesh" when filtering for "Maharashtra"). Always use
+`filters[field.keyword]` for exact string matching.
+
+This is handled automatically by `src/utils/maharashtra.py`:
+
+```python
+from src.utils.maharashtra import build_maharashtra_api_filters
+
+# Returns: {"filters[state.keyword]": "Maharashtra"}
+params = build_maharashtra_api_filters()
+```
+
+### Health Check Before Downloads
+
+The download scripts perform an automatic health check before downloading:
+
+1. **API Connectivity**: Verifies data.gov.in is reachable
+2. **Filter Validation**: Confirms `state.keyword` filter returns ONLY Maharashtra
+3. **Data Availability**: Ensures Maharashtra records exist (total > 0)
+4. **Fallback**: Uses cached data if API is unavailable
+
+Health check results are saved to `data/metadata/maharashtra/healthcheck_*.json`.
+
+### Self-Check Script
+
+Run `self_check_datagov.py` to diagnose API issues:
+
+```bash
+python scripts/self_check_datagov.py --verbose
+```
+
+This script:
+- Verifies API key is present and valid
+- Tests API connectivity and latency
+- Compares `filters[state]` vs `filters[state.keyword]` behavior
+- Confirms Maharashtra data availability
 
 ---
 
@@ -131,18 +194,20 @@ mandimitra/
 │   ├── validation.log
 │   └── maharashtra_*.md           # Audit reports
 ├── scripts/
-│   ├── discover_maharashtra_mandi_metadata.py  # Discovery step
-│   ├── download_mandi_maharashtra.py           # Maharashtra mandi
-│   ├── download_weather_maharashtra.py         # Maharashtra weather
-│   └── validate_data.py                        # Data validation
+│   ├── discover_maharashtra_mandi_metadata.py  # Streaming discovery
+│   ├── download_mandi_maharashtra.py           # Parallel mandi download
+│   ├── download_weather_maharashtra.py         # Parallel weather download
+│   ├── validate_data.py                        # Data validation
+│   └── self_check.py                           # Codebase validation
 ├── src/
 │   └── utils/
 │       ├── __init__.py
-│       ├── http_utils.py       # HTTP client with retries
+│       ├── http.py             # HTTP client + rate limiting (new)
+│       ├── http_utils.py       # Legacy HTTP client (deprecated)
 │       ├── io_utils.py         # File I/O and receipts
 │       ├── logging_utils.py    # Logging configuration
 │       ├── maharashtra.py      # Maharashtra constants & validation
-│       ├── progress.py         # Download progress tracking
+│       ├── progress.py         # Batched progress tracking (atomic)
 │       └── audit.py            # Markdown audit reports
 ├── .env.example                # Environment template
 ├── .gitignore                  # Git ignore rules
@@ -156,18 +221,23 @@ mandimitra/
 
 ### Step 1: Discovery (`discover_maharashtra_mandi_metadata.py`)
 
-Query the API to find all available Maharashtra data before downloading.
+Query the API to find all available Maharashtra data using streaming (constant memory).
 
 ```bash
-# Discover unique districts, markets, and commodities
-python scripts/discover_maharashtra_mandi_metadata.py
+# Fast discovery (first 50 pages - recommended for quick checks)
+python scripts/discover_maharashtra_mandi_metadata.py --discover-fast
+
+# Full discovery (all records - streaming, no memory growth)
+python scripts/discover_maharashtra_mandi_metadata.py --discover-full
 
 # Force refresh existing discovery data
-python scripts/discover_maharashtra_mandi_metadata.py --force
+python scripts/discover_maharashtra_mandi_metadata.py --discover-fast --no-resume
 
 # Verbose output
-python scripts/discover_maharashtra_mandi_metadata.py --verbose
+python scripts/discover_maharashtra_mandi_metadata.py --discover-fast --verbose
 ```
+
+**Memory Safety**: Uses streaming pagination - memory usage is constant regardless of total records.
 
 **Outputs:**
 - `data/metadata/maharashtra/districts.csv` - Unique districts
@@ -177,11 +247,11 @@ python scripts/discover_maharashtra_mandi_metadata.py --verbose
 
 ### Step 2: Download Mandi Prices (`download_mandi_maharashtra.py`)
 
-Download Maharashtra commodity prices with automatic chunking.
+Download Maharashtra commodity prices with parallel processing and adaptive rate limiting.
 
 ```bash
-# Download ALL Maharashtra data (auto-selects bulk or chunked)
-python scripts/download_mandi_maharashtra.py --download-all
+# Download ALL Maharashtra data (parallel, 4 workers)
+python scripts/download_mandi_maharashtra.py --download-all --max-workers 4
 
 # Download for specific district only
 python scripts/download_mandi_maharashtra.py --district "Pune"
@@ -190,15 +260,24 @@ python scripts/download_mandi_maharashtra.py --district "Pune"
 python scripts/download_mandi_maharashtra.py --resume
 
 # Force re-download (ignore progress)
-python scripts/download_mandi_maharashtra.py --download-all --force
+python scripts/download_mandi_maharashtra.py --download-all --no-resume
+
+# Custom rate limiting
+python scripts/download_mandi_maharashtra.py --download-all --rate-limit auto --base-delay 0.5
+
+# Trust API filter (skip per-record MH validation)
+python scripts/download_mandi_maharashtra.py --download-all --trust-api-filter
 
 # Verbose mode
 python scripts/download_mandi_maharashtra.py --download-all --verbose
 ```
 
-**Download Strategy:**
-- **Bulk Mode**: If <500K rows total, downloads all at once
-- **Chunked Mode**: If ≥500K rows, downloads by district for resumability
+**Optimizations:**
+- **Single Count Call**: Fetches total count once per chunk (no duplicate API calls)
+- **Parallel Downloads**: ThreadPoolExecutor with configurable workers (max 8)
+- **Adaptive Rate Limiting**: Token bucket algorithm with 429 handling
+- **Batched Progress**: Atomic saves every 10 chunks
+- **Summary Logging**: Non-MH violations logged in batch, not per-record
 
 **Outputs:**
 ```
@@ -215,30 +294,35 @@ data/raw/mandi/maharashtra/
 
 ### Step 3: Download Weather Data (`download_weather_maharashtra.py`)
 
-Download weather data for all 36 Maharashtra district headquarters.
+Download weather data for all 36 Maharashtra district headquarters with parallel processing.
 
 ```bash
-# Download BOTH NASA POWER historical AND Open-Meteo forecasts
-python scripts/download_weather_maharashtra.py --all
+# Download BOTH NASA POWER historical AND Open-Meteo forecasts (parallel)
+python scripts/download_weather_maharashtra.py --all --all-districts --max-workers 2
 
 # Download NASA POWER historical only (last 365 days)
-python scripts/download_weather_maharashtra.py --power
+python scripts/download_weather_maharashtra.py --power --all-districts
 
 # Download Open-Meteo forecasts only (16-day)
-python scripts/download_weather_maharashtra.py --openmeteo
+python scripts/download_weather_maharashtra.py --openmeteo --all-districts
 
 # Download for specific district only
 python scripts/download_weather_maharashtra.py --district "Pune" --all
 
-# Download for all districts
-python scripts/download_weather_maharashtra.py --all-districts --all
-
 # Custom date range for historical
-python scripts/download_weather_maharashtra.py --power --start 20240101 --end 20241231
+python scripts/download_weather_maharashtra.py --power --all-districts --start-date 20240101 --end-date 20241231
 
 # Resume interrupted download
-python scripts/download_weather_maharashtra.py --power --resume
+python scripts/download_weather_maharashtra.py --power --all-districts --resume
+
+# Custom rate limiting
+python scripts/download_weather_maharashtra.py --all --all-districts --rate-limit auto --base-delay 1.0
 ```
+
+**Optimizations:**
+- **Parallel Downloads**: ThreadPoolExecutor with configurable workers (max 4 for weather APIs)
+- **Shared Rate Limiter**: Thread-safe across all workers
+- **Per-Worker Sessions**: Connection pooling for each thread
 
 **Outputs:**
 ```
@@ -430,19 +514,48 @@ Maharashtra-only constraint verified.
 | Error Type | Handling |
 |------------|----------|
 | Missing API key | Clear error message with setup instructions |
-| Rate limiting (429) | Automatic retry with exponential backoff |
-| Server errors (5xx) | Retry up to 5 times with backoff |
-| Non-Maharashtra data | **AUTOMATIC DROP** - logged as warning |
+| Rate limiting (429) | Adaptive retry with token bucket backoff |
+| Server errors (5xx) | Retry up to 5 times with exponential backoff |
+| Non-Maharashtra data | **AUTOMATIC DROP** - logged as batch summary |
 | Validation failure | Exit code 1 (strict) or 2 (constraint violation) |
 | Interrupted download | Resume with `--resume` flag |
+| Progress corruption | Atomic writes prevent partial saves |
+
+---
+
+## 🔍 Self-Check Validation
+
+Run the self-check script to validate the codebase meets production standards:
+
+```bash
+# Basic check
+python scripts/self_check.py
+
+# Verbose output with details
+python scripts/self_check.py --verbose
+```
+
+**Checks Performed:**
+- ✓ Security: No exposed API keys in code
+- ✓ Security: .gitignore protects secrets
+- ✓ Memory: No unbounded list growth in pagination
+- ✓ Memory: CSV loaders handle comment lines
+- ✓ Constraint: Maharashtra is hardcoded, not parameterized
+- ✓ Quality: Using new consolidated http module
+- ✓ Quality: No bare except clauses
+- ✓ Performance: Rate limiting in download scripts
+- ✓ Performance: Progress tracking with batched saves
 
 ---
 
 ## 🧪 Testing
 
 ```bash
+# Run self-check to validate codebase
+python scripts/self_check.py --verbose
+
 # Run discovery (quick validation of API access)
-python scripts/discover_maharashtra_mandi_metadata.py
+python scripts/discover_maharashtra_mandi_metadata.py --discover-fast
 
 # Download small sample (one district)
 python scripts/download_mandi_maharashtra.py --district "Pune"

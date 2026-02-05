@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MANDIMITRA - Maharashtra Weather Data Downloader
+MANDIMITRA - Maharashtra Weather Data Downloader (Production-Grade)
 
 Downloads weather data EXCLUSIVELY for Maharashtra district headquarters:
 - Historical rainfall from NASA POWER (PRECTOTCORR)
@@ -8,9 +8,16 @@ Downloads weather data EXCLUSIVELY for Maharashtra district headquarters:
 
 ⚠️  HARD CONSTRAINT: This script ONLY downloads data for Maharashtra locations.
 
+OPTIMIZATIONS:
+- Parallel downloads with ThreadPoolExecutor (--max-workers)
+- Adaptive rate limiting with 429 handling
+- Batched progress saves (atomic writes)
+- Connection pooling per worker
+- Summary logging instead of per-record
+
 Usage:
     python scripts/download_weather_maharashtra.py --power --all-districts
-    python scripts/download_weather_maharashtra.py --openmeteo --all-districts
+    python scripts/download_weather_maharashtra.py --openmeteo --all-districts --max-workers 4
     python scripts/download_weather_maharashtra.py --all --all-districts
     python scripts/download_weather_maharashtra.py --power --district "Pune"
     python scripts/download_weather_maharashtra.py --help
@@ -20,12 +27,14 @@ Output:
     data/raw/weather/openmeteo_forecast/maharashtra/<district>/forecast_*.csv
 
 Author: MANDIMITRA Team
+Version: 2.0.0 (Production Refactor)
 """
 
 import argparse
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -44,14 +53,14 @@ from src.utils.io_utils import (
     save_receipt,
     sanitize_filename,
 )
-from src.utils.http_utils import (
+from src.utils.http import (
     APIError,
-    EmptyResponseError,
+    RateLimitMode,
+    AdaptiveRateLimiter,
     create_session,
     make_request,
 )
 from src.utils.logging_utils import (
-    ProgressLogger,
     get_utc_timestamp_safe,
     setup_logger,
 )
@@ -59,6 +68,10 @@ from src.utils.maharashtra import MAHARASHTRA_STATE_NAME
 from src.utils.progress import ProgressTracker
 from src.utils.audit import AuditLogger
 
+
+# =============================================================================
+# CLI
+# =============================================================================
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments."""
@@ -74,13 +87,14 @@ Data Sources:
     --openmeteo   Open-Meteo 16-day forecast
     --all         Download from both sources
 
-Coverage:
-    --all-districts   Download for all 36 Maharashtra districts
-    --district NAME   Download for specific district only
+OPTIMIZATIONS:
+    - Parallel downloads with --max-workers (default: 1, max: 4)
+    - Adaptive rate limiting handles API throttling automatically
+    - Batched progress saves prevent data corruption
 
 Examples:
-    # Download NASA POWER data for all Maharashtra districts (1 year)
-    python scripts/download_weather_maharashtra.py --power --all-districts
+    # Download NASA POWER for all districts (parallel, 2 workers)
+    python scripts/download_weather_maharashtra.py --power --all-districts --max-workers 2
     
     # Download Open-Meteo forecast for all districts
     python scripts/download_weather_maharashtra.py --openmeteo --all-districts
@@ -88,8 +102,8 @@ Examples:
     # Download both for specific district
     python scripts/download_weather_maharashtra.py --all --district "Pune"
     
-    # Download NASA POWER with custom date range
-    python scripts/download_weather_maharashtra.py --power --all-districts --days-back 730
+    # Resume interrupted download
+    python scripts/download_weather_maharashtra.py --power --all-districts --resume
         """,
     )
     
@@ -152,18 +166,44 @@ Examples:
         help="Forecast days (default: 16, max: 16)",
     )
     
-    # Resumability
+    # Concurrency
     parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=1,
+        help="Parallel workers for downloads (default: 1, max: 4)",
+    )
+    
+    # Rate limiting
+    parser.add_argument(
+        "--rate-limit",
+        type=str,
+        choices=["auto", "fixed", "disabled"],
+        default="auto",
+        help="Rate limiting mode (default: auto)",
+    )
+    parser.add_argument(
+        "--base-delay",
+        type=float,
+        default=1.0,
+        help="Base delay between requests (default: 1.0s for weather APIs)",
+    )
+    
+    # Resumability (FIXED: proper --resume/--no-resume handling)
+    resume_group = parser.add_mutually_exclusive_group()
+    resume_group.add_argument(
         "--resume",
+        dest="resume",
         action="store_true",
-        default=True,
-        help="Resume interrupted download (default: True)",
+        help="Resume from progress file if exists (default)",
     )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Restart from scratch (ignore progress)",
+    resume_group.add_argument(
+        "--no-resume",
+        dest="resume",
+        action="store_false",
+        help="Start fresh, ignore progress file",
     )
+    parser.set_defaults(resume=True)
     
     # Configuration
     parser.add_argument(
@@ -190,23 +230,19 @@ Examples:
     return parser.parse_args()
 
 
+# =============================================================================
+# HELPERS
+# =============================================================================
+
 def load_maharashtra_locations(locations_file: Path) -> pd.DataFrame:
-    """
-    Load Maharashtra district locations.
-    
-    Args:
-        locations_file: Path to locations CSV
-        
-    Returns:
-        DataFrame with location data
-    """
+    """Load Maharashtra district locations with CSV comment handling."""
     if not locations_file.exists():
         raise FileNotFoundError(
             f"Maharashtra locations file not found: {locations_file}\n"
             "This file should contain coordinates for all 36 Maharashtra district HQs."
         )
     
-    df = pd.read_csv(locations_file)
+    df = pd.read_csv(locations_file, comment="#", skip_blank_lines=True)
     
     # Validate required columns
     required = ["location_id", "district", "latitude", "longitude"]
@@ -237,6 +273,10 @@ def get_date_range(
     return start_dt.strftime("%Y%m%d"), end_dt.strftime("%Y%m%d")
 
 
+# =============================================================================
+# DOWNLOAD FUNCTIONS
+# =============================================================================
+
 def download_power_data(
     session,
     api_base: str,
@@ -245,6 +285,7 @@ def download_power_data(
     start_date: str,
     end_date: str,
     parameters: List[str],
+    rate_limiter: AdaptiveRateLimiter,
     logger,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Download historical data from NASA POWER API."""
@@ -260,7 +301,7 @@ def download_power_data(
         f"format=JSON"
     )
     
-    response, _ = make_request(session, url, logger=logger)
+    response, _ = make_request(session, url, logger=logger, rate_limiter=rate_limiter)
     
     # Check for errors
     if "messages" in response and response.get("messages"):
@@ -271,7 +312,7 @@ def download_power_data(
     parameter_data = properties.get("parameter", {})
     
     if not parameter_data:
-        raise EmptyResponseError("NASA POWER returned no data")
+        return pd.DataFrame(), {}
     
     # Convert to DataFrame
     df = pd.DataFrame(parameter_data)
@@ -300,6 +341,7 @@ def download_openmeteo_data(
     daily_variables: List[str],
     forecast_days: int,
     timezone_str: str,
+    rate_limiter: AdaptiveRateLimiter,
     logger,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Download forecast from Open-Meteo API."""
@@ -311,14 +353,14 @@ def download_openmeteo_data(
         "timezone": timezone_str,
     }
     
-    response, _ = make_request(session, api_base, params=params, logger=logger)
+    response, _ = make_request(session, api_base, params=params, logger=logger, rate_limiter=rate_limiter)
     
     if "error" in response and response["error"]:
         raise APIError(f"Open-Meteo error: {response.get('reason', 'Unknown')}")
     
     daily_data = response.get("daily", {})
     if not daily_data:
-        raise EmptyResponseError("Open-Meteo returned no data")
+        return pd.DataFrame(), {}
     
     df = pd.DataFrame(daily_data)
     if "time" in df.columns:
@@ -336,39 +378,71 @@ def download_openmeteo_data(
     return df, metadata
 
 
-def process_power_location(
-    session,
-    config: Dict[str, Any],
-    location: Dict[str, Any],
-    start_date: str,
-    end_date: str,
-    output_dir: Path,
-    logger,
-) -> Optional[Path]:
-    """Process NASA POWER download for one location."""
+# =============================================================================
+# WORKER FUNCTIONS (Thread-Safe)
+# =============================================================================
+
+def power_worker(args_tuple: Tuple) -> Dict[str, Any]:
+    """
+    Worker function for parallel NASA POWER downloads.
+    Thread-safe: creates own session per worker.
+    """
+    (
+        location, api_base, parameters, start_date, end_date,
+        output_dir, rate_limiter, http_config, logger_name
+    ) = args_tuple
+    
     district = location["district"]
     lat = location["latitude"]
     lon = location["longitude"]
+    location_id = location["location_id"]
     
-    logger.info(f"  Downloading NASA POWER for {district} ({lat}, {lon})")
+    result = {
+        "location_id": location_id,
+        "district": district,
+        "success": False,
+        "rows": 0,
+        "error": None,
+        "output_file": None,
+        "duration_seconds": 0,
+    }
+    
+    # Create thread-local session
+    session = create_session(
+        max_retries=http_config["max_retries"],
+        backoff_factor=http_config["backoff_factor"],
+        retry_status_codes=http_config["retry_status_codes"],
+        timeout=http_config.get("timeout", 60),
+        pool_connections=2,
+        pool_maxsize=5,
+    )
+    
+    logger = setup_logger(
+        f"{logger_name}_power_{district}",
+        PROJECT_ROOT / "logs" / "download.log",
+        level="INFO"
+    )
+    
+    start_time = time.time()
     
     try:
-        power_config = config["nasa_power"]
-        
         df, metadata = download_power_data(
             session=session,
-            api_base=power_config["api_base"],
+            api_base=api_base,
             lat=lat,
             lon=lon,
             start_date=start_date,
             end_date=end_date,
-            parameters=power_config["parameters"],
+            parameters=parameters,
+            rate_limiter=rate_limiter,
             logger=logger,
         )
         
+        result["duration_seconds"] = time.time() - start_time
+        
         if df.empty:
-            logger.warning(f"No data for {district}")
-            return None
+            result["success"] = True
+            return result
         
         # Save
         district_dir = output_dir / sanitize_filename(district)
@@ -387,55 +461,89 @@ def process_power_location(
             "longitude": lon,
             "start_date": start_date,
             "end_date": end_date,
-            "parameters": power_config["parameters"],
+            "parameters": parameters,
             "rows": len(df),
+            "duration_seconds": round(result["duration_seconds"], 2),
             "source": "NASA POWER",
         }
         
         receipt_path = district_dir / f"receipt_{start_date}_{end_date}.json"
         save_receipt(receipt_path, receipt)
         
-        logger.info(f"  ✓ Saved {len(df)} days to {output_path}")
-        return output_path
+        result["success"] = True
+        result["rows"] = len(df)
+        result["output_file"] = str(output_path)
+        logger.info(f"✓ {district}: {len(df)} days")
         
     except Exception as e:
-        logger.error(f"  ✗ Failed for {district}: {e}")
-        return None
+        result["error"] = str(e)
+        result["duration_seconds"] = time.time() - start_time
+        logger.error(f"✗ {district}: {e}")
+    
+    return result
 
 
-def process_openmeteo_location(
-    session,
-    config: Dict[str, Any],
-    location: Dict[str, Any],
-    forecast_days: int,
-    output_dir: Path,
-    timestamp: str,
-    logger,
-) -> Optional[Path]:
-    """Process Open-Meteo download for one location."""
+def openmeteo_worker(args_tuple: Tuple) -> Dict[str, Any]:
+    """
+    Worker function for parallel Open-Meteo downloads.
+    Thread-safe: creates own session per worker.
+    """
+    (
+        location, api_base, daily_variables, forecast_days, timezone_str,
+        output_dir, timestamp, rate_limiter, http_config, logger_name
+    ) = args_tuple
+    
     district = location["district"]
     lat = location["latitude"]
     lon = location["longitude"]
+    location_id = location["location_id"]
     
-    logger.info(f"  Downloading Open-Meteo for {district} ({lat}, {lon})")
+    result = {
+        "location_id": location_id,
+        "district": district,
+        "success": False,
+        "rows": 0,
+        "error": None,
+        "output_file": None,
+        "duration_seconds": 0,
+    }
+    
+    # Create thread-local session
+    session = create_session(
+        max_retries=http_config["max_retries"],
+        backoff_factor=http_config["backoff_factor"],
+        retry_status_codes=http_config["retry_status_codes"],
+        timeout=http_config.get("timeout", 60),
+        pool_connections=2,
+        pool_maxsize=5,
+    )
+    
+    logger = setup_logger(
+        f"{logger_name}_meteo_{district}",
+        PROJECT_ROOT / "logs" / "download.log",
+        level="INFO"
+    )
+    
+    start_time = time.time()
     
     try:
-        meteo_config = config["openmeteo"]
-        
         df, metadata = download_openmeteo_data(
             session=session,
-            api_base=meteo_config["api_base"],
+            api_base=api_base,
             lat=lat,
             lon=lon,
-            daily_variables=meteo_config["daily_variables"],
+            daily_variables=daily_variables,
             forecast_days=forecast_days,
-            timezone_str=meteo_config["timezone"],
+            timezone_str=timezone_str,
+            rate_limiter=rate_limiter,
             logger=logger,
         )
         
+        result["duration_seconds"] = time.time() - start_time
+        
         if df.empty:
-            logger.warning(f"No data for {district}")
-            return None
+            result["success"] = True
+            return result
         
         # Save
         district_dir = output_dir / sanitize_filename(district)
@@ -453,21 +561,31 @@ def process_openmeteo_location(
             "latitude": lat,
             "longitude": lon,
             "forecast_days": forecast_days,
-            "daily_variables": meteo_config["daily_variables"],
+            "daily_variables": daily_variables,
             "rows": len(df),
+            "duration_seconds": round(result["duration_seconds"], 2),
             "source": "Open-Meteo",
         }
         
         receipt_path = district_dir / f"receipt_{timestamp}.json"
         save_receipt(receipt_path, receipt)
         
-        logger.info(f"  ✓ Saved {len(df)} days to {output_path}")
-        return output_path
+        result["success"] = True
+        result["rows"] = len(df)
+        result["output_file"] = str(output_path)
+        logger.info(f"✓ {district}: {len(df)} days")
         
     except Exception as e:
-        logger.error(f"  ✗ Failed for {district}: {e}")
-        return None
+        result["error"] = str(e)
+        result["duration_seconds"] = time.time() - start_time
+        logger.error(f"✗ {district}: {e}")
+    
+    return result
 
+
+# =============================================================================
+# MAIN
+# =============================================================================
 
 def main():
     """Main entry point for Maharashtra weather download."""
@@ -482,31 +600,38 @@ def main():
         print("❌ Error: Specify coverage: --all-districts or --district NAME")
         return 1
     
+    # Validate workers (weather APIs are more rate-limited)
+    max_workers = min(args.max_workers, 4)
+    
     # Setup
     log_level = "DEBUG" if args.verbose else "INFO"
     log_file = PROJECT_ROOT / "logs" / "download.log"
-    logger = setup_logger("mh_weather_download", log_file, level=log_level)
+    logger = setup_logger("mh_weather", log_file, level=log_level)
     
     timestamp = get_utc_timestamp_safe()
     audit = AuditLogger("weather_download", PROJECT_ROOT / "logs", timestamp)
     
     logger.info("=" * 70)
     logger.info("MANDIMITRA - Maharashtra Weather Data Downloader")
+    logger.info(f"Workers: {max_workers} | Rate limit: {args.rate_limit}")
     logger.info("⚠️  HARD CONSTRAINT: MAHARASHTRA ONLY")
     logger.info("=" * 70)
     
     stats = {
         "power_success": 0,
         "power_failed": 0,
+        "power_rows": 0,
         "openmeteo_success": 0,
         "openmeteo_failed": 0,
+        "openmeteo_rows": 0,
+        "total_duration": 0,
     }
     
     try:
         # Load configuration
         config_path = PROJECT_ROOT / args.config
         config = load_config(config_path)
-        logger.info(f"Loaded configuration from {config_path}")
+        logger.info(f"Config loaded ✓")
         
         # Load Maharashtra locations
         locations_file = PROJECT_ROOT / args.locations_file
@@ -521,26 +646,28 @@ def main():
                 return 1
             logger.info(f"Filtered to district: {args.district}")
         
+        http_config = config["http"]
+        
         audit.add_section("Configuration", {
             "state": MAHARASHTRA_STATE_NAME,
             "locations_file": str(locations_file),
             "total_locations": len(locations_df),
+            "max_workers": max_workers,
             "download_power": args.power or args.all,
             "download_openmeteo": args.openmeteo or args.all,
         })
         
-        # Create HTTP session
-        http_config = config["http"]
-        session = create_session(
-            max_retries=http_config["max_retries"],
-            backoff_factor=http_config["backoff_factor"],
-            retry_status_codes=http_config["retry_status_codes"],
-            timeout=http_config["timeout"],
+        # Shared rate limiter (thread-safe)
+        rate_limiter = AdaptiveRateLimiter(
+            mode=RateLimitMode(args.rate_limit),
+            base_delay=args.base_delay,
         )
         
         # Progress tracker
         progress_file = PROJECT_ROOT / "data" / "metadata" / "maharashtra" / "weather_progress.json"
-        tracker = ProgressTracker(progress_file)
+        tracker = ProgressTracker(progress_file, batch_size=10)
+        
+        start_time = time.time()
         
         # === NASA POWER Downloads ===
         if args.power or args.all:
@@ -551,6 +678,7 @@ def main():
             start_date, end_date = get_date_range(args.start_date, args.end_date, args.days_back)
             logger.info(f"Date range: {start_date} to {end_date}")
             
+            power_config = config["nasa_power"]
             power_output = PROJECT_ROOT / config["paths"]["maharashtra"]["weather_power"]
             
             # Track progress
@@ -559,38 +687,57 @@ def main():
                 "power_download",
                 chunks=district_ids,
                 metadata={"start_date": start_date, "end_date": end_date},
-                force_restart=args.force,
+                force_restart=not args.resume,
             )
             
-            pending = district_ids if args.force else tracker.get_pending_chunks("power_download")
+            pending_ids = tracker.get_pending_chunks("power_download")
+            pending_locations = locations_df[locations_df["location_id"].isin(pending_ids)]
             
-            with ProgressLogger(logger, "NASA POWER downloads") as progress:
-                for _, loc in locations_df.iterrows():
-                    if loc["location_id"] not in pending:
-                        logger.debug(f"Skipping {loc['district']} (already completed)")
-                        continue
-                    
-                    tracker.mark_in_progress("power_download", loc["location_id"])
-                    
-                    result = process_power_location(
-                        session=session,
-                        config=config,
-                        location=loc.to_dict(),
-                        start_date=start_date,
-                        end_date=end_date,
-                        output_dir=power_output,
-                        logger=logger,
+            if pending_locations.empty:
+                logger.info("All NASA POWER downloads completed")
+            else:
+                logger.info(f"Downloading {len(pending_locations)} locations...")
+                
+                # Build worker args
+                worker_args = [
+                    (
+                        loc.to_dict(), power_config["api_base"], power_config["parameters"],
+                        start_date, end_date, power_output, rate_limiter, http_config, "mh_worker"
                     )
+                    for _, loc in pending_locations.iterrows()
+                ]
+                
+                # Parallel download
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(power_worker, arg): arg[0]["district"]
+                        for arg in worker_args
+                    }
                     
-                    if result:
-                        tracker.mark_completed("power_download", loc["location_id"], output_file=str(result))
-                        stats["power_success"] += 1
-                    else:
-                        tracker.mark_failed("power_download", loc["location_id"], "No data")
-                        stats["power_failed"] += 1
-                    
-                    progress.update(f"Completed {stats['power_success']}/{len(locations_df)}")
-                    time.sleep(1)  # Rate limiting
+                    for future in as_completed(futures):
+                        district = futures[future]
+                        try:
+                            result = future.result()
+                            
+                            if result["success"]:
+                                tracker.mark_completed(
+                                    "power_download", result["location_id"],
+                                    rows=result["rows"],
+                                    output_file=result["output_file"],
+                                )
+                                stats["power_success"] += 1
+                                stats["power_rows"] += result["rows"]
+                            else:
+                                tracker.mark_failed("power_download", result["location_id"], result["error"] or "Unknown")
+                                stats["power_failed"] += 1
+                                audit.add_error(f"NASA POWER {district}: {result['error']}")
+                                
+                        except Exception as e:
+                            tracker.mark_failed("power_download", result["location_id"], str(e))
+                            stats["power_failed"] += 1
+                            audit.add_error(f"NASA POWER {district}: {e}")
+                
+                tracker.flush()
         
         # === Open-Meteo Downloads ===
         if args.openmeteo or args.all:
@@ -598,6 +745,7 @@ def main():
             logger.info("Open-Meteo 16-Day Forecast")
             logger.info("=" * 50)
             
+            meteo_config = config["openmeteo"]
             meteo_output = PROJECT_ROOT / config["paths"]["maharashtra"]["weather_openmeteo"]
             
             # Track progress
@@ -606,44 +754,69 @@ def main():
                 "openmeteo_download",
                 chunks=district_ids,
                 metadata={"forecast_days": args.forecast_days},
-                force_restart=args.force,
+                force_restart=not args.resume,
             )
             
-            pending = district_ids if args.force else tracker.get_pending_chunks("openmeteo_download")
+            pending_ids = tracker.get_pending_chunks("openmeteo_download")
+            pending_locations = locations_df[locations_df["location_id"].isin(pending_ids)]
             
-            with ProgressLogger(logger, "Open-Meteo downloads") as progress:
-                for _, loc in locations_df.iterrows():
-                    if loc["location_id"] not in pending:
-                        logger.debug(f"Skipping {loc['district']} (already completed)")
-                        continue
-                    
-                    tracker.mark_in_progress("openmeteo_download", loc["location_id"])
-                    
-                    result = process_openmeteo_location(
-                        session=session,
-                        config=config,
-                        location=loc.to_dict(),
-                        forecast_days=args.forecast_days,
-                        output_dir=meteo_output,
-                        timestamp=timestamp,
-                        logger=logger,
+            if pending_locations.empty:
+                logger.info("All Open-Meteo downloads completed")
+            else:
+                logger.info(f"Downloading {len(pending_locations)} locations...")
+                
+                # Build worker args
+                worker_args = [
+                    (
+                        loc.to_dict(), meteo_config["api_base"], meteo_config["daily_variables"],
+                        args.forecast_days, meteo_config["timezone"], meteo_output,
+                        timestamp, rate_limiter, http_config, "mh_worker"
                     )
+                    for _, loc in pending_locations.iterrows()
+                ]
+                
+                # Parallel download
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(openmeteo_worker, arg): arg[0]["district"]
+                        for arg in worker_args
+                    }
                     
-                    if result:
-                        tracker.mark_completed("openmeteo_download", loc["location_id"], output_file=str(result))
-                        stats["openmeteo_success"] += 1
-                    else:
-                        tracker.mark_failed("openmeteo_download", loc["location_id"], "No data")
-                        stats["openmeteo_failed"] += 1
-                    
-                    progress.update(f"Completed {stats['openmeteo_success']}/{len(locations_df)}")
-                    time.sleep(0.5)  # Rate limiting
+                    for future in as_completed(futures):
+                        district = futures[future]
+                        try:
+                            result = future.result()
+                            
+                            if result["success"]:
+                                tracker.mark_completed(
+                                    "openmeteo_download", result["location_id"],
+                                    rows=result["rows"],
+                                    output_file=result["output_file"],
+                                )
+                                stats["openmeteo_success"] += 1
+                                stats["openmeteo_rows"] += result["rows"]
+                            else:
+                                tracker.mark_failed("openmeteo_download", result["location_id"], result["error"] or "Unknown")
+                                stats["openmeteo_failed"] += 1
+                                audit.add_error(f"Open-Meteo {district}: {result['error']}")
+                                
+                        except Exception as e:
+                            tracker.mark_failed("openmeteo_download", result["location_id"], str(e))
+                            stats["openmeteo_failed"] += 1
+                            audit.add_error(f"Open-Meteo {district}: {e}")
+                
+                tracker.flush()
+        
+        stats["total_duration"] = time.time() - start_time
         
         # Audit summary
         audit.add_metric("NASA POWER Success", stats["power_success"])
         audit.add_metric("NASA POWER Failed", stats["power_failed"])
+        audit.add_metric("NASA POWER Rows", stats["power_rows"])
         audit.add_metric("Open-Meteo Success", stats["openmeteo_success"])
         audit.add_metric("Open-Meteo Failed", stats["openmeteo_failed"])
+        audit.add_metric("Open-Meteo Rows", stats["openmeteo_rows"])
+        audit.add_metric("Duration (seconds)", round(stats["total_duration"], 2))
         
         if stats["power_failed"] > 0:
             audit.add_warning(f"{stats['power_failed']} NASA POWER downloads failed")
@@ -653,16 +826,10 @@ def main():
         audit_path = audit.save()
         
         # Summary
-        logger.info("=" * 70)
-        logger.info("✅ Maharashtra Weather Download Complete!")
-        logger.info(f"   State: {MAHARASHTRA_STATE_NAME}")
-        logger.info(f"   NASA POWER: {stats['power_success']} success, {stats['power_failed']} failed")
-        logger.info(f"   Open-Meteo: {stats['openmeteo_success']} success, {stats['openmeteo_failed']} failed")
-        logger.info("=" * 70)
-        
         print(f"\n✅ Maharashtra Weather Download Complete!")
-        print(f"   🌧️ NASA POWER: {stats['power_success']} success, {stats['power_failed']} failed")
-        print(f"   ☁️ Open-Meteo: {stats['openmeteo_success']} success, {stats['openmeteo_failed']} failed")
+        print(f"   🌧️ NASA POWER: {stats['power_success']} success, {stats['power_failed']} failed ({stats['power_rows']:,} days)")
+        print(f"   ☁️ Open-Meteo: {stats['openmeteo_success']} success, {stats['openmeteo_failed']} failed ({stats['openmeteo_rows']:,} days)")
+        print(f"   ⏱️  Duration: {stats['total_duration']:.1f}s")
         print(f"   📋 Audit: {audit_path}")
         
         total_failed = stats["power_failed"] + stats["openmeteo_failed"]

@@ -1,0 +1,23 @@
+{
+  "discovery_timestamp_utc": "2026-02-05T12:07:44.475370+00:00",
+  "state": "Maharashtra",
+  "api_endpoint": "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070",
+  "resource_id": "9ef84268-d588-465a-a308-a864a43d0070",
+  "mode": "fast",
+  "statistics": {
+    "total_available": 227,
+    "total_processed": 227,
+    "pages_fetched": 1,
+    "non_mh_dropped": 0,
+    "unique_districts": 14,
+    "unique_markets": 25,
+    "unique_commodities": 66,
+    "duration_seconds": 0.64
+  },
+  "output_files": {
+    "districts": "data\\metadata\\maharashtra\\districts.csv",
+    "markets": "data\\metadata\\maharashtra\\markets.csv",
+    "commodities": "data\\metadata\\maharashtra\\commodities.csv"
+  },
+  "download_timestamp_utc": "2026-02-05T12:07:44.475370+00:00"
+}

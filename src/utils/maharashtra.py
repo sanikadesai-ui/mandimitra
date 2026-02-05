@@ -1,9 +1,17 @@
 """
 Maharashtra-specific constants and utilities for MANDIMITRA.
 This module enforces strict Maharashtra-only constraints.
+
+IMPORTANT: Data.gov.in API Filter
+---------------------------------
+The AGMARKNET mandi dataset (resource 9ef84268-d588-465a-a308-a864a43d0070)
+requires `filters[state.keyword]` NOT `filters[state]` for exact matching.
+
+Using `filters[state]` performs a partial/fuzzy match and may return
+records from other states. Always use build_maharashtra_api_filters().
 """
 
-from typing import Final
+from typing import Any, Dict, Final, Optional
 
 # =============================================================================
 # HARD CONSTRAINT: MAHARASHTRA ONLY
@@ -134,3 +142,83 @@ def normalize_district_name(district: str) -> str:
     
     normalized = district.strip().lower()
     return variations.get(normalized, district.strip().title())
+
+
+# =============================================================================
+# API FILTER BUILDER (CRITICAL FOR DATA.GOV.IN)
+# =============================================================================
+
+def build_maharashtra_api_filters(
+    district: Optional[str] = None,
+    market: Optional[str] = None,
+    commodity: Optional[str] = None,
+) -> Dict[str, str]:
+    """
+    Build API filter parameters for Maharashtra-only queries.
+    
+    CRITICAL: Uses `filters[state.keyword]` for EXACT matching.
+    The Data.gov.in AGMARKNET dataset ignores `filters[state]` for exact
+    matching - it does fuzzy/partial match which returns other states.
+    
+    Args:
+        district: Optional district filter
+        market: Optional market filter  
+        commodity: Optional commodity filter
+        
+    Returns:
+        Dict of filter parameters ready for API request
+        
+    Example:
+        >>> filters = build_maharashtra_api_filters(district="Pune")
+        >>> # Returns: {"filters[state.keyword]": "Maharashtra", "filters[district]": "Pune"}
+    """
+    # CRITICAL: Use state.keyword for exact match, NOT state
+    filters: Dict[str, str] = {
+        "filters[state.keyword]": MAHARASHTRA_STATE_NAME,
+    }
+    
+    if district:
+        filters["filters[district]"] = district
+    if market:
+        filters["filters[market]"] = market
+    if commodity:
+        filters["filters[commodity]"] = commodity
+    
+    return filters
+
+
+def build_maharashtra_request_params(
+    api_key: str,
+    limit: int = 500,
+    offset: int = 0,
+    district: Optional[str] = None,
+    market: Optional[str] = None,
+    commodity: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build complete request parameters for Maharashtra mandi API.
+    
+    Combines API key, pagination, format, and Maharashtra filters.
+    
+    Args:
+        api_key: Data.gov.in API key
+        limit: Records per page (default: 500 for rate limit safety)
+        offset: Pagination offset
+        district: Optional district filter
+        market: Optional market filter
+        commodity: Optional commodity filter
+        
+    Returns:
+        Complete params dict for requests.get()
+    """
+    params: Dict[str, Any] = {
+        "api-key": api_key,
+        "format": "json",
+        "limit": limit,
+        "offset": offset,
+    }
+    
+    # Add Maharashtra filters
+    params.update(build_maharashtra_api_filters(district, market, commodity))
+    
+    return params

@@ -36,9 +36,8 @@ from src.utils.io_utils import (
     save_receipt,
     sanitize_filename,
 )
-from src.utils.http_utils import (
+from src.utils.http import (
     APIError,
-    EmptyResponseError,
     create_session,
     make_request,
 )

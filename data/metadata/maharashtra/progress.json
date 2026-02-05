@@ -1,0 +1,125 @@
+{
+  "mandi_download": {
+    "started_utc": "2026-02-05T12:08:03.000935+00:00",
+    "total_chunks": 14,
+    "chunks": {
+      "Ahmednagar": {
+        "status": "completed",
+        "rows": 49,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:08:08.008386+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Ahmednagar\\20260205_120800\\mandi.csv",
+        "duration_seconds": 0.4185349941253662
+      },
+      "Buldhana": {
+        "status": "completed",
+        "rows": 4,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:08:08.374786+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Buldhana\\20260205_120800\\mandi.csv",
+        "duration_seconds": 0.35904788970947266
+      },
+      "Gadchiroli": {
+        "status": "completed",
+        "rows": 3,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:08:08.706211+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Gadchiroli\\20260205_120800\\mandi.csv",
+        "duration_seconds": 0.3225712776184082
+      },
+      "Gondiya": {
+        "status": "completed",
+        "rows": 1,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:08:09.078843+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Gondiya\\20260205_120800\\mandi.csv",
+        "duration_seconds": 0.353060245513916
+      },
+      "Jalgaon": {
+        "status": "completed",
+        "rows": 25,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:08:09.809876+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Jalgaon\\20260205_120800\\mandi.csv",
+        "duration_seconds": 0.7294604778289795
+      },
+      "Mumbai": {
+        "status": "completed",
+        "rows": 51,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:08:11.509322+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Mumbai\\20260205_120800\\mandi.csv",
+        "duration_seconds": 1.6919538974761963
+      },
+      "Nagpur": {
+        "status": "completed",
+        "rows": 13,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:08:11.860215+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Nagpur\\20260205_120800\\mandi.csv",
+        "duration_seconds": 0.34410524368286133
+      },
+      "Nashik": {
+        "status": "completed",
+        "rows": 1,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:08:12.208043+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Nashik\\20260205_120800\\mandi.csv",
+        "duration_seconds": 0.3412961959838867
+      },
+      "Pune": {
+        "status": "completed",
+        "rows": 30,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:08:12.609216+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Pune\\20260205_120800\\mandi.csv",
+        "duration_seconds": 0.39365458488464355
+      },
+      "Raigad": {
+        "status": "completed",
+        "rows": 8,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:09:13.274032+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Raigad\\20260205_120800\\mandi.csv",
+        "duration_seconds": 60.6648154258728
+      },
+      "Satara": {
+        "status": "completed",
+        "rows": 9,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:09:14.158074+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Satara\\20260205_120800\\mandi.csv",
+        "duration_seconds": 0.877396821975708
+      },
+      "Sholapur": {
+        "status": "completed",
+        "rows": 21,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:09:14.577203+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Sholapur\\20260205_120800\\mandi.csv",
+        "duration_seconds": 0.41881608963012695
+      },
+      "Thane": {
+        "status": "completed",
+        "rows": 2,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:10:15.157531+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Thane\\20260205_120800\\mandi.csv",
+        "duration_seconds": 60.57709360122681
+      },
+      "Wardha": {
+        "status": "completed",
+        "rows": 10,
+        "attempts": 0,
+        "completed_utc": "2026-02-05T12:10:15.544653+00:00",
+        "output_file": "D:\\mandimitra\\data\\raw\\mandi\\maharashtra\\Wardha\\20260205_120800\\mandi.csv",
+        "duration_seconds": 0.3651731014251709
+      }
+    },
+    "metadata": {},
+    "completed_count": 14,
+    "failed_count": 0,
+    "total_rows": 227
+  },
+  "last_saved_utc": "2026-02-05T12:10:15.544653+00:00"
+}
