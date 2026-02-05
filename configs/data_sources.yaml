@@ -1,0 +1,279 @@
+# =============================================================================
+# MANDIMITRA - Data Sources Configuration
+# =============================================================================
+# Central configuration for all data sources: Mandi (historical + current) + Weather
+# ⚠️  HARD CONSTRAINT: All data must be Maharashtra-only
+# =============================================================================
+
+# Project Metadata
+project:
+  name: "MANDIMITRA"
+  version: "2.1.0"
+  description: "Maharashtra Mandi Price Intelligence + Crop-Risk Models"
+  author: "MANDIMITRA Team"
+
+# =============================================================================
+# MANDI DATA SOURCES
+# =============================================================================
+
+mandi:
+  # ---------------------------------------------------------------------------
+  # Historical Mandi Data (for ML training)
+  # ---------------------------------------------------------------------------
+  historical:
+    # Primary source: Kaggle AGMARKNET historical dataset
+    kaggle:
+      enabled: true
+      dataset_slug: "ramjasmaurya/daily-commodity-prices-india-2003-2021"  # Example slug
+      # Alternative datasets (try in order if primary fails):
+      fallback_datasets:
+        - "anshtanwar/agmarknet-commodity-prices"
+        - "mohitbharti/india-agricultural-commodities-prices"
+      
+      # Extraction settings
+      extract_dir: "data/raw/mandi/kaggle_download"
+      
+      # Expected files (varies by dataset - will auto-detect CSV/ZIP)
+      expected_patterns:
+        - "*.csv"
+        - "*.zip"
+        - "**/*.csv"
+    
+    # Secondary source: Local import (user provides their own file)
+    local_import:
+      enabled: true
+      # User can override this path via CLI
+      default_path: null  # Set via --input-file CLI argument
+      supported_formats:
+        - ".csv"
+        - ".csv.gz"
+        - ".zip"
+        - ".parquet"
+    
+    # Processing settings
+    processing:
+      chunk_size: 100000  # Rows per chunk for memory-safe processing
+      output_format: "parquet"  # "parquet" or "csv"
+      output_path: "data/processed/mandi/history_maharashtra.parquet"
+      
+      # Column mapping (map source columns to standard schema)
+      # Will auto-detect common variations
+      column_mapping:
+        state: ["state", "State", "STATE", "state_name"]
+        district: ["district", "District", "DISTRICT", "district_name"]
+        market: ["market", "Market", "MARKET", "market_name", "mandi"]
+        commodity: ["commodity", "Commodity", "COMMODITY", "commodity_name"]
+        variety: ["variety", "Variety", "VARIETY", "variety_name", "grade"]
+        grade: ["grade", "Grade", "GRADE"]
+        arrival_date: ["arrival_date", "Arrival_Date", "date", "Date", "arrival_dt", "reported_date"]
+        min_price: ["min_price", "Min_Price", "minimum_price", "price_min"]
+        max_price: ["max_price", "Max_Price", "maximum_price", "price_max"]
+        modal_price: ["modal_price", "Modal_Price", "mode_price", "avg_price", "price"]
+      
+      # Date parsing formats (will try in order)
+      date_formats:
+        - "%d/%m/%Y"
+        - "%Y-%m-%d"
+        - "%d-%m-%Y"
+        - "%Y/%m/%d"
+        - "%d %b %Y"
+        - "%d-%b-%Y"
+
+  # ---------------------------------------------------------------------------
+  # Current/Live Mandi Data (daily updates from Data.gov.in)
+  # ---------------------------------------------------------------------------
+  current:
+    source: "datagov"
+    api_base: "https://api.data.gov.in/resource"
+    resource_id: "9ef84268-d588-465a-a308-a864a43d0070"
+    format: "json"
+    
+    # Pagination settings (reduced for rate limit safety)
+    page_size: 500
+    max_pages: null  # null = unlimited (fetch all)
+    
+    # Output settings
+    output_dir: "data/raw/mandi/current"
+    partition_by: "date"  # Creates YYYY-MM-DD folders
+    
+    # Health check settings
+    health_check:
+      enabled: true
+      timeout: 30
+      min_records: 1  # Fail if fewer than this
+      save_result: true
+      result_path: "data/metadata/maharashtra/healthcheck_current.json"
+    
+    # Fallback behavior when API unavailable
+    fallback:
+      use_cached: true
+      max_cache_age_days: 7  # Use cache up to 7 days old
+
+  # ---------------------------------------------------------------------------
+  # Merged Dataset (historical + current upsert)
+  # ---------------------------------------------------------------------------
+  merged:
+    output_path: "data/processed/mandi/mandi_maharashtra_all.parquet"
+    backup_path: "data/processed/mandi/backups"
+    
+    # Deduplication key (defines unique record)
+    dedup_keys:
+      - "state"
+      - "district"
+      - "market"
+      - "commodity"
+      - "variety"
+      - "grade"
+      - "arrival_date"
+    
+    # Upsert behavior: current data overwrites historical for same keys
+    upsert_strategy: "current_wins"
+    
+    # Keep backup of previous merged file
+    keep_backups: 3
+
+# =============================================================================
+# WEATHER DATA SOURCES
+# =============================================================================
+
+weather:
+  # ---------------------------------------------------------------------------
+  # NASA POWER Historical Daily Data
+  # ---------------------------------------------------------------------------
+  nasa_power:
+    enabled: true
+    api_base: "https://power.larc.nasa.gov/api/temporal/daily/point"
+    community: "AG"
+    format: "JSON"
+    
+    # Parameters to download
+    parameters:
+      - "PRECTOTCORR"  # Precipitation corrected (mm/day)
+      - "T2M"          # Temperature at 2m (°C)
+      - "T2M_MAX"      # Max temperature (°C)
+      - "T2M_MIN"      # Min temperature (°C)
+      - "RH2M"         # Relative humidity at 2m (%)
+    
+    # Date range (years back from today)
+    years_back: 10  # Download 10 years of historical data
+    
+    # Rate limiting
+    requests_per_minute: 30
+    delay_between_requests: 2.0  # NASA POWER rate limit is strict
+    
+    # Output settings
+    output_dir: "data/raw/weather/power_daily/maharashtra"
+    output_format: "csv"
+    
+    # Locations (all 36 Maharashtra district HQs)
+    locations_file: "configs/maharashtra_locations.csv"
+
+  # ---------------------------------------------------------------------------
+  # Open-Meteo 16-Day Forecast
+  # ---------------------------------------------------------------------------
+  openmeteo:
+    enabled: true
+    api_base: "https://api.open-meteo.com/v1/forecast"
+    
+    # Forecast parameters
+    daily_variables:
+      - "precipitation_sum"
+      - "precipitation_probability_max"
+      - "temperature_2m_max"
+      - "temperature_2m_min"
+      - "relative_humidity_2m_max"
+      - "relative_humidity_2m_min"
+    
+    forecast_days: 16
+    timezone: "Asia/Kolkata"
+    
+    # Rate limiting (Open-Meteo is generous but be polite)
+    requests_per_minute: 60
+    delay_between_requests: 0.5
+    
+    # Output settings
+    output_dir: "data/raw/weather/openmeteo_forecast/maharashtra"
+    output_format: "csv"
+    
+    # Locations (all 36 Maharashtra district HQs)
+    locations_file: "configs/maharashtra_locations.csv"
+
+# =============================================================================
+# HTTP CLIENT SETTINGS
+# =============================================================================
+
+http:
+  timeout: 60
+  max_retries: 5
+  backoff_factor: 2.0
+  retry_status_codes:
+    - 429
+    - 500
+    - 502
+    - 503
+    - 504
+  
+  # Connection pooling
+  pool_connections: 10
+  pool_maxsize: 20
+  
+  # Rate limiting
+  rate_limit:
+    mode: "auto"  # "auto", "fixed", "disabled"
+    base_delay: 0.5
+
+# =============================================================================
+# PARALLEL PROCESSING
+# =============================================================================
+
+parallel:
+  # Max workers for different operations
+  mandi_download: 2     # Data.gov.in is rate-limited
+  weather_download: 4   # NASA/Open-Meteo can handle more
+  data_processing: 4    # Local processing
+
+# =============================================================================
+# VALIDATION SETTINGS
+# =============================================================================
+
+validation:
+  # Maharashtra-only enforcement
+  strict_maharashtra: true
+  fail_on_non_mh: true
+  
+  # Schema validation
+  validate_schema: true
+  
+  # Data quality thresholds
+  max_missing_percent: 10  # Warn if >10% missing values
+  min_records_current: 10  # Warn if current feed has fewer records
+
+# =============================================================================
+# OUTPUT SETTINGS
+# =============================================================================
+
+output:
+  # Default formats
+  default_format: "parquet"  # "parquet" or "csv"
+  
+  # Compression
+  parquet_compression: "snappy"
+  csv_compression: null  # null, "gzip", "bz2"
+  
+  # Receipts and audit
+  generate_receipts: true
+  generate_audit: true
+  redact_secrets: true
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+logging:
+  level: "INFO"
+  file: "logs/download.log"
+  audit_dir: "logs"
+  
+  # Batched logging (reduce spam)
+  batch_warnings: true
+  max_warning_examples: 5

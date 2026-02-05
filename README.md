@@ -79,6 +79,35 @@ copy .env.example .env  # Windows
 
 ### 4. Recommended Workflow
 
+#### Quick Start: Download All Data (Recommended)
+
+```bash
+# STEP 0: Copy environment template and add your API keys
+copy .env.example .env
+# Edit .env to add:
+#   - DATAGOV_API_KEY (for current mandi data)
+#   - KAGGLE_USERNAME and KAGGLE_KEY (for historical mandi data)
+
+# STEP 1: Run the full data pipeline
+python scripts/download_all_data.py --historical-source kaggle
+
+# OR: Skip Kaggle and import a local historical file
+python scripts/download_all_data.py --historical-source local --historical-file /path/to/history.csv
+
+# OR: Skip historical data if you already have it
+python scripts/download_all_data.py --skip-historical
+```
+
+The `download_all_data.py` script orchestrates the complete pipeline:
+1. **Historical Mandi** - Downloads multi-year training data (Kaggle or local)
+2. **Current Mandi** - Downloads latest prices from Data.gov.in
+3. **Merge/Upsert** - Combines historical + current with deduplication
+4. **NASA POWER** - Downloads 10 years of historical weather
+5. **Open-Meteo** - Downloads 16-day forecasts
+6. **Completeness Report** - Generates Markdown summary
+
+#### Alternative: Step-by-Step Workflow
+
 ```bash
 # STEP 0: Run API self-check to verify connectivity and filters
 python scripts/self_check_datagov.py --verbose
@@ -155,12 +184,100 @@ This script:
 
 ---
 
+## 🔥 Full Data Pipeline (Training + Live Updates)
+
+MANDIMITRA supports two types of mandi data:
+
+| Data Type | Source | Purpose | Update Frequency |
+|-----------|--------|---------|------------------|
+| **Historical** | Kaggle (AGMARKNET archive) | ML model training | One-time download |
+| **Current** | Data.gov.in API | Live price updates | Daily |
+
+### Historical Mandi Data
+
+Multi-year historical data for training ML models:
+
+```bash
+# Option A: Download from Kaggle (requires KAGGLE_USERNAME + KAGGLE_KEY)
+python scripts/download_mandi_history_kaggle.py --download
+
+# Option B: Import local file (CSV, ZIP, or Parquet)
+python scripts/import_mandi_history.py --input-file /path/to/data.csv --import
+
+# Preview first 10 rows before importing
+python scripts/import_mandi_history.py --input-file /path/to/data.csv --preview
+```
+
+**Output:** `data/processed/mandi/history_maharashtra.parquet`
+
+### Current Mandi Data
+
+Daily prices from Data.gov.in API:
+
+```bash
+# Download current data (today's prices)
+python scripts/download_mandi_current_datagov.py --download
+
+# Force refresh (ignore cache)
+python scripts/download_mandi_current_datagov.py --download --force-refresh
+```
+
+**Output:** `data/raw/mandi/current/YYYY-MM-DD/mandi_current.csv`
+
+### Merge/Upsert
+
+Combine historical + current into a single training dataset:
+
+```bash
+# Merge with current-wins strategy (newer records overwrite)
+python scripts/merge_mandi_datasets.py --merge
+
+# Preview merge without saving
+python scripts/merge_mandi_datasets.py --dry-run
+```
+
+**Deduplication Key:** `[state, district, market, commodity, variety, grade, arrival_date]`
+
+**Output:** `data/processed/mandi/mandi_maharashtra_all.parquet`
+
+### Weather Data
+
+Download weather for all 36 Maharashtra districts:
+
+```bash
+# NASA POWER: 10 years historical weather
+python scripts/download_weather_power_maharashtra.py --download
+
+# Open-Meteo: 16-day forecasts
+python scripts/download_weather_openmeteo_maharashtra.py --download
+```
+
+### Data Completeness Report
+
+Generate a comprehensive Markdown report:
+
+```bash
+python scripts/generate_completeness_report.py
+```
+
+**Output:** `logs/data_completeness_<timestamp>.md`
+
+The report includes:
+- Mandi data date ranges and record counts
+- District/market/commodity coverage
+- Weather data coverage (vs expected 36 districts)
+- Missing data identification
+- Recommendations for data gaps
+
+---
+
 ## 📁 Project Structure
 
 ```
 mandimitra/
 ├── configs/
 │   ├── project.yaml              # Central configuration (Maharashtra settings)
+│   ├── data_sources.yaml         # Data source configurations (Kaggle, APIs)
 │   └── maharashtra_locations.csv # 36 district HQ coordinates
 ├── data/
 │   ├── metadata/
@@ -169,15 +286,22 @@ mandimitra/
 │   │       ├── markets.csv
 │   │       ├── commodities.csv
 │   │       └── discovery_receipt.json
+│   ├── processed/
+│   │   └── mandi/
+│   │       ├── history_maharashtra.parquet  # Historical data
+│   │       └── mandi_maharashtra_all.parquet # Merged training data
 │   └── raw/
 │       ├── mandi/
-│       │   └── maharashtra/
-│       │       ├── {district}/        # Chunked by district
-│       │       │   ├── mandi_{timestamp}.csv
-│       │       │   └── receipt_{timestamp}.json
-│       │       ├── merged/            # Combined files
-│       │       │   └── merged_{timestamp}.csv
-│       │       └── progress.json      # Resumability state
+│       │   ├── maharashtra/
+│       │   │   ├── {district}/        # Chunked by district
+│       │   │   │   ├── mandi_{timestamp}.csv
+│       │   │   │   └── receipt_{timestamp}.json
+│       │   │   ├── merged/            # Combined files
+│       │   │   │   └── merged_{timestamp}.csv
+│       │   │   └── progress.json      # Resumability state
+│       │   └── current/
+│       │       └── YYYY-MM-DD/        # Date-partitioned current data
+│       │           └── mandi_current.csv
 │       └── weather/
 │           ├── power_daily/
 │           │   └── maharashtra/
@@ -192,27 +316,41 @@ mandimitra/
 ├── logs/
 │   ├── download.log
 │   ├── validation.log
+│   ├── data_completeness_*.md     # Completeness reports
 │   └── maharashtra_*.md           # Audit reports
 ├── scripts/
 │   ├── discover_maharashtra_mandi_metadata.py  # Streaming discovery
-│   ├── download_mandi_maharashtra.py           # Parallel mandi download
-│   ├── download_weather_maharashtra.py         # Parallel weather download
+│   ├── download_all_data.py                    # Full pipeline orchestrator
+│   ├── download_mandi_history_kaggle.py        # Kaggle historical download
+│   ├── import_mandi_history.py                 # Local file import
+│   ├── download_mandi_current_datagov.py       # Current mandi from API
+│   ├── download_mandi_maharashtra.py           # Legacy mandi download
+│   ├── merge_mandi_datasets.py                 # Upsert historical+current
+│   ├── download_weather_power_maharashtra.py   # NASA POWER historical
+│   ├── download_weather_openmeteo_maharashtra.py # Open-Meteo forecast
+│   ├── download_weather_maharashtra.py         # Legacy weather download
+│   ├── generate_completeness_report.py         # Data completeness report
 │   ├── validate_data.py                        # Data validation
-│   └── self_check.py                           # Codebase validation
+│   ├── self_check.py                           # Codebase validation
+│   └── self_check_datagov.py                   # API connectivity check
 ├── src/
+│   ├── schemas/
+│   │   ├── __init__.py
+│   │   ├── mandi.py              # Mandi data Pandera schemas
+│   │   └── weather.py            # Weather data Pandera schemas
 │   └── utils/
 │       ├── __init__.py
-│       ├── http.py             # HTTP client + rate limiting (new)
-│       ├── http_utils.py       # Legacy HTTP client (deprecated)
-│       ├── io_utils.py         # File I/O and receipts
-│       ├── logging_utils.py    # Logging configuration
-│       ├── maharashtra.py      # Maharashtra constants & validation
-│       ├── progress.py         # Batched progress tracking (atomic)
-│       └── audit.py            # Markdown audit reports
-├── .env.example                # Environment template
-├── .gitignore                  # Git ignore rules
-├── requirements.txt            # Python dependencies
-└── README.md                   # This file
+│       ├── http.py               # HTTP client + rate limiting (new)
+│       ├── http_utils.py         # Legacy HTTP client (deprecated)
+│       ├── io_utils.py           # File I/O and receipts
+│       ├── logging_utils.py      # Logging configuration
+│       ├── maharashtra.py        # Maharashtra constants & validation
+│       ├── progress.py           # Batched progress tracking (atomic)
+│       └── audit.py              # Markdown audit reports
+├── .env.example                  # Environment template
+├── .gitignore                    # Git ignore rules
+├── requirements.txt              # Python dependencies
+└── README.md                     # This file
 ```
 
 ---
