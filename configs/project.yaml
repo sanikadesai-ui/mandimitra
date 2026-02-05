@@ -1,0 +1,114 @@
+# MANDIMITRA Project Configuration
+# Central configuration for data download pipelines
+# ⚠️  THIS PROJECT IS STRICTLY MAHARASHTRA-ONLY
+
+project:
+  name: "MANDIMITRA"
+  version: "2.0.0"
+  description: "Maharashtra Mandi Price Intelligence + Rainfall/Crop-Risk Models"
+  
+# =============================================================================
+# HARD CONSTRAINT: MAHARASHTRA ONLY
+# This project exclusively serves Maharashtra farmers.
+# All data downloads are restricted to Maharashtra state.
+# =============================================================================
+maharashtra:
+  state_name: "Maharashtra"
+  state_code: "MH"
+  total_districts: 36
+  locations_file: "configs/maharashtra_locations.csv"
+
+# Data.gov.in Mandi API Configuration
+mandi:
+  api_base: "https://api.data.gov.in/resource"
+  resource_id: "9ef84268-d588-465a-a308-a864a43d0070"
+  format: "json"
+  page_size: 1000  # Records per page (max usually 10000)
+  
+  # HARDCODED: Maharashtra only - cannot be overridden
+  state_filter: "Maharashtra"
+  
+  # Download strategy
+  strategy:
+    # Option A: Single bulk download (preferred if total < 500K rows)
+    # Option B: Chunk by district (if bulk too large)
+    mode: "auto"  # "bulk", "chunked", or "auto"
+    chunk_by: "district"  # Only used if mode is "chunked"
+    max_rows_for_bulk: 500000  # Switch to chunked if total exceeds this
+  
+  # Resumability
+  progress_file: "data/metadata/maharashtra/progress.json"
+  
+  # Rate limiting
+  requests_per_minute: 30
+  sleep_between_pages: 0.5  # seconds
+
+# NASA POWER API Configuration (Historical Rainfall)
+nasa_power:
+  api_base: "https://power.larc.nasa.gov/api/temporal/daily/point"
+  community: "AG"  # Agricultural community
+  parameters:
+    - "PRECTOTCORR"  # Precipitation Corrected
+    - "T2M"          # Temperature at 2 meters
+    - "T2M_MAX"      # Max temperature
+    - "T2M_MIN"      # Min temperature
+    - "RH2M"         # Relative humidity at 2 meters
+  format: "JSON"
+  
+  # Default date range (days back from today)
+  default_days_back: 365
+  
+  # Maharashtra coverage
+  coverage: "maharashtra_districts"  # Download for all 36 district HQs
+
+# Open-Meteo API Configuration (Rainfall Forecast)
+openmeteo:
+  api_base: "https://api.open-meteo.com/v1/forecast"
+  daily_variables:
+    - "precipitation_sum"
+    - "precipitation_probability_max"
+    - "temperature_2m_max"
+    - "temperature_2m_min"
+    - "relative_humidity_2m_max"
+    - "relative_humidity_2m_min"
+  forecast_days: 16
+  timezone: "Asia/Kolkata"  # IST for Maharashtra
+  
+  # Maharashtra coverage
+  coverage: "maharashtra_districts"
+
+# HTTP Request Settings
+http:
+  timeout: 60          # seconds
+  max_retries: 5
+  backoff_factor: 2    # Exponential backoff multiplier (2.0 = 1s, 2s, 4s, 8s...)
+  retry_status_codes:
+    - 429  # Too Many Requests
+    - 500  # Internal Server Error
+    - 502  # Bad Gateway
+    - 503  # Service Unavailable
+    - 504  # Gateway Timeout
+  max_workers: 4       # Max concurrent downloads (respect rate limits)
+
+# Output Paths (relative to project root)
+paths:
+  data_raw: "data/raw"
+  data_processed: "data/processed"
+  data_metadata: "data/metadata"
+  logs: "logs"
+  
+  # Maharashtra-specific paths
+  maharashtra:
+    mandi: "data/raw/mandi/maharashtra"
+    mandi_merged: "data/raw/mandi/maharashtra/merged"
+    weather_power: "data/raw/weather/power_daily/maharashtra"
+    weather_openmeteo: "data/raw/weather/openmeteo_forecast/maharashtra"
+    metadata: "data/metadata/maharashtra"
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  file: "logs/download.log"
+  audit_dir: "logs"  # For audit summaries

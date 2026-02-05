@@ -1,0 +1,23 @@
+# MANDIMITRA - Data Pipeline Requirements
+# Python 3.10+ recommended
+
+# Core data handling
+pandas>=2.0.0
+
+# HTTP requests with retry support
+requests>=2.31.0
+urllib3>=2.0.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Configuration
+PyYAML>=6.0
+
+# Data validation
+pandera>=0.18.0
+
+# Optional: For enhanced type checking (development)
+# mypy>=1.0.0
+# types-requests>=2.31.0
+# types-PyYAML>=6.0

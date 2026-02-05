@@ -1,0 +1,15 @@
+# Location Master Data for Weather Downloads
+# Each row represents a location of interest (mandi/farm/district)
+# Add your locations here with lat/lon coordinates
+
+location_id,location_name,state,district,latitude,longitude,description
+LOC001,Azadpur Mandi,Delhi,New Delhi,28.7041,77.1025,Asia's largest wholesale market for fruits and vegetables
+LOC002,Vashi APMC,Maharashtra,Mumbai,19.0760,72.8777,Major wholesale market in Mumbai
+LOC003,Yeshwanthpur APMC,Karnataka,Bengaluru,13.0196,77.5380,Key market in Karnataka
+LOC004,Koyambedu,Tamil Nadu,Chennai,13.0694,80.1948,Largest perishable goods market in South India
+LOC005,Ghazipur Mandi,Delhi,East Delhi,28.6211,77.3222,Major wholesale market for flowers and vegetables
+LOC006,Pune Market Yard,Maharashtra,Pune,18.5204,73.8567,Central marketplace for agricultural produce
+LOC007,Rajkot APMC,Gujarat,Rajkot,22.3039,70.8022,Important agricultural trading hub
+LOC008,Indore Mandi,Madhya Pradesh,Indore,22.7196,75.8577,Key central India market
+LOC009,Ludhiana Grain Market,Punjab,Ludhiana,30.9010,75.8573,Major grain trading center
+LOC010,Hyderabad Kothapet,Telangana,Hyderabad,17.3850,78.4867,South India's major fruit market

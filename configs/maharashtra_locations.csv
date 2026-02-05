@@ -1,0 +1,43 @@
+# Maharashtra District Headquarters - Coordinates for Weather Data
+# Source: Official district HQ locations (curated reference data)
+# Coverage: All 36 districts of Maharashtra
+# Method: District headquarters centroid coordinates
+# Last Updated: 2026-02-04
+
+location_id,district,district_hq,latitude,longitude,region,division
+MH_AHMEDNAGAR,Ahmednagar,Ahmednagar,19.0948,74.7480,Western Maharashtra,Nashik
+MH_AKOLA,Akola,Akola,20.7059,77.0058,Vidarbha,Amravati
+MH_AMRAVATI,Amravati,Amravati,20.9320,77.7523,Vidarbha,Amravati
+MH_AURANGABAD,Aurangabad,Aurangabad,19.8762,75.3433,Marathwada,Aurangabad
+MH_BEED,Beed,Beed,18.9891,75.7601,Marathwada,Aurangabad
+MH_BHANDARA,Bhandara,Bhandara,21.1669,79.6500,Vidarbha,Nagpur
+MH_BULDHANA,Buldhana,Buldhana,20.5293,76.1842,Vidarbha,Amravati
+MH_CHANDRAPUR,Chandrapur,Chandrapur,19.9500,79.2961,Vidarbha,Nagpur
+MH_DHULE,Dhule,Dhule,20.9042,74.7749,Khandesh,Nashik
+MH_GADCHIROLI,Gadchiroli,Gadchiroli,20.1057,80.0028,Vidarbha,Nagpur
+MH_GONDIA,Gondia,Gondia,21.4602,80.1920,Vidarbha,Nagpur
+MH_HINGOLI,Hingoli,Hingoli,19.7173,77.1510,Marathwada,Aurangabad
+MH_JALGAON,Jalgaon,Jalgaon,21.0077,75.5626,Khandesh,Nashik
+MH_JALNA,Jalna,Jalna,19.8347,75.8800,Marathwada,Aurangabad
+MH_KOLHAPUR,Kolhapur,Kolhapur,16.7050,74.2433,Western Maharashtra,Pune
+MH_LATUR,Latur,Latur,18.4088,76.5604,Marathwada,Aurangabad
+MH_MUMBAI_CITY,Mumbai City,Mumbai,18.9388,72.8354,Konkan,Mumbai
+MH_MUMBAI_SUBURBAN,Mumbai Suburban,Mumbai,19.0760,72.8777,Konkan,Mumbai
+MH_NAGPUR,Nagpur,Nagpur,21.1458,79.0882,Vidarbha,Nagpur
+MH_NANDED,Nanded,Nanded,19.1383,77.3210,Marathwada,Aurangabad
+MH_NANDURBAR,Nandurbar,Nandurbar,21.3662,74.2390,Khandesh,Nashik
+MH_NASHIK,Nashik,Nashik,19.9975,73.7898,Western Maharashtra,Nashik
+MH_OSMANABAD,Osmanabad,Osmanabad,18.1860,76.0400,Marathwada,Aurangabad
+MH_PALGHAR,Palghar,Palghar,19.6967,72.7651,Konkan,Mumbai
+MH_PARBHANI,Parbhani,Parbhani,19.2704,76.7748,Marathwada,Aurangabad
+MH_PUNE,Pune,Pune,18.5204,73.8567,Western Maharashtra,Pune
+MH_RAIGAD,Raigad,Alibag,18.6414,72.8722,Konkan,Mumbai
+MH_RATNAGIRI,Ratnagiri,Ratnagiri,16.9944,73.3002,Konkan,Mumbai
+MH_SANGLI,Sangli,Sangli,16.8524,74.5815,Western Maharashtra,Pune
+MH_SATARA,Satara,Satara,17.6805,73.9942,Western Maharashtra,Pune
+MH_SINDHUDURG,Sindhudurg,Sindhudurg,16.3489,73.7553,Konkan,Mumbai
+MH_SOLAPUR,Solapur,Solapur,17.6599,75.9064,Western Maharashtra,Pune
+MH_THANE,Thane,Thane,19.2183,72.9781,Konkan,Mumbai
+MH_WARDHA,Wardha,Wardha,20.7453,78.6022,Vidarbha,Nagpur
+MH_WASHIM,Washim,Washim,20.1114,77.1337,Vidarbha,Amravati
+MH_YAVATMAL,Yavatmal,Yavatmal,20.3899,78.1307,Vidarbha,Amravati
