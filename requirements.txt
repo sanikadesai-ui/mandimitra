@@ -3,6 +3,13 @@
 
 # Core data handling
 pandas>=2.0.0
+numpy>=1.24.0
+
+# Parquet support
+pyarrow>=14.0.0
+
+# In-memory SQL engine for deduplication (handles 6M+ rows efficiently)
+duckdb>=0.10.0
 
 # HTTP requests with retry support
 requests>=2.31.0
@@ -16,6 +23,9 @@ PyYAML>=6.0
 
 # Data validation
 pandera>=0.18.0
+
+# Optional: Fuzzy string matching for district normalization
+# rapidfuzz>=3.0.0
 
 # Optional: For enhanced type checking (development)
 # mypy>=1.0.0

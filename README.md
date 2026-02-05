@@ -271,7 +271,93 @@ The report includes:
 
 ---
 
-## 📁 Project Structure
+## � Canonical Data Processing Pipeline (NEW)
+
+After downloading raw data, run the **canonical data processing pipeline** to create:
+- **Deduplicated** datasets with zero duplicate keys
+- **Normalized** district names (35 mandi districts → 36 canonical)
+- **Join-ready** outputs for ML training
+
+### Quick Start: Build All Processed Data
+
+```bash
+# Run the full processing pipeline
+python scripts/build_all_processed.py
+
+# Dry-run (preview without saving)
+python scripts/build_all_processed.py --dry-run
+```
+
+This runs three steps in order:
+1. **build_canonical_mandi.py** → Deduplicated mandi data
+2. **process_weather.py** → Standardized weather data
+3. **build_model_datasets.py** → ML-ready joined datasets
+
+### Output Files
+
+```
+data/processed/
+├── mandi/
+│   └── mandi_canonical.parquet       # Deduplicated mandi (6M+ rows)
+├── weather/
+│   ├── power_daily_maharashtra.parquet  # NASA POWER historical
+│   └── forecast_maharashtra.parquet     # Open-Meteo forecast
+├── model/
+│   ├── mandi_only_2001_2026.parquet     # Full mandi history (no weather)
+│   └── mandi_weather_2016plus.parquet   # Mandi + weather joined
+├── dim_districts.csv                    # 36 canonical districts
+└── dim_commodities.csv                  # Commodity dimension table
+```
+
+### Deduplication Strategy
+
+The canonical pipeline uses **DuckDB** for memory-efficient SQL-based deduplication:
+
+**Natural Key:** `(state, district, market, commodity, variety, grade, arrival_date)`
+
+**Priority Rules:**
+1. `current` source beats `history` source (newer data wins)
+2. Rows with more complete prices preferred
+3. Tiebreaker: highest `modal_price`
+
+### District Normalization
+
+Maps 35 raw mandi district names to 36 canonical Maharashtra districts:
+
+| Raw Name | Canonical Name |
+|----------|----------------|
+| Sholapur | Solapur |
+| Gondiya | Gondia |
+| Amarawati | Amravati |
+| Chattrapati Sambhajinagar | Aurangabad |
+| Dharashiv (Usmanabad) | Osmanabad |
+| Jalana | Jalna |
+| Vashim | Washim |
+
+### Model Datasets
+
+**`mandi_only_2001_2026.parquet`** (full history, no weather)
+- Use for: Long-term trend analysis, commodity-only models, seasonal patterns
+- Rows: ~6 million
+- Date range: 2001-2026
+
+**`mandi_weather_2016plus.parquet`** (mandi + weather joined)
+- Use for: Weather-aware price prediction, climate impact analysis
+- Joined on: `(date, district)`
+- Weather columns: `t2m_max`, `t2m_min`, `humidity`, `precipitation`, `wind_speed`, `solar_radiation`
+- Date range: 2016+ (NASA POWER availability)
+
+### QC Reports
+
+Processing generates quality reports in `logs/`:
+- `mandi_dedup_report_<timestamp>.md` - Deduplication stats
+- `weather_qc_report_<timestamp>.md` - Weather validation
+- `model_datasets_report_<timestamp>.md` - Final dataset summary
+- `unmapped_districts_<timestamp>.md` - Any unmapped district names
+
+---
+
+## �📁 Project Structure
 
 ```
 mandimitra/
