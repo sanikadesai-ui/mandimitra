@@ -1,3 +1,7 @@
+# =============================================================================
+# MANDIMITRA .gitignore
+# =============================================================================
+
 # Environment and secrets - NEVER COMMIT THESE
 .env
 .env.local
@@ -5,14 +9,14 @@
 *.env
 secrets/
 **/secrets/**
-
-# Explicitly keep only the example file
 !.env.example
 
-# Data directories (raw data should not be committed)
+# Data directories (raw data + processed should not be committed)
 data/raw/
 data/processed/
 data/interim/
+data/external/
+data/metadata/
 
 # Logs
 logs/
@@ -46,6 +50,13 @@ ENV/
 env/
 .venv/
 
+# Node.js / Next.js
+node_modules/
+web/node_modules/
+web/.next/
+web/out/
+.next/
+
 # IDE
 .idea/
 .vscode/
@@ -59,6 +70,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Testing
 .pytest_cache/
@@ -67,3 +79,7 @@ htmlcov/
 
 # MyPy
 .mypy_cache/
+
+# Temp / scratch files
+_test_*.py
+_check_*.py

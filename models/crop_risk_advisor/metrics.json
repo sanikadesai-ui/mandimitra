@@ -1,0 +1,96 @@
+{
+  "accuracy": 0.8740341942524554,
+  "f1_macro": 0.6108464346552555,
+  "f1_weighted": 0.8864565907573012,
+  "high_risk_recall": 0.45890909090909093,
+  "cv_f1_macro_mean": 0.6201810585832908,
+  "cv_accuracy_mean": 0.8803422385192945,
+  "cv_scores": [
+    {
+      "fold": 1,
+      "f1_macro": 0.6194572032829889,
+      "accuracy": 0.9004539898725337
+    },
+    {
+      "fold": 2,
+      "f1_macro": 0.6208263348290483,
+      "accuracy": 0.8960363191898026
+    },
+    {
+      "fold": 3,
+      "f1_macro": 0.625271835409254,
+      "accuracy": 0.878540247948315
+    },
+    {
+      "fold": 4,
+      "f1_macro": 0.6291808507412758,
+      "accuracy": 0.8671905011349746
+    },
+    {
+      "fold": 5,
+      "f1_macro": 0.6061690686538865,
+      "accuracy": 0.8594901344508469
+    }
+  ],
+  "confusion_matrix": [
+    [
+      55219,
+      5148,
+      156
+    ],
+    [
+      1559,
+      4218,
+      1050
+    ],
+    [
+      3,
+      741,
+      631
+    ]
+  ],
+  "n_train": 274900,
+  "n_test": 68725,
+  "shap_top_features": [
+    {
+      "feature": "district",
+      "shap_importance": 0.12413335366345869
+    },
+    {
+      "feature": "temp_std",
+      "shap_importance": 0.07016584000789287
+    },
+    {
+      "feature": "stage_progress",
+      "shap_importance": 0.056532697119998566
+    },
+    {
+      "feature": "crop",
+      "shap_importance": 0.05546536553864368
+    },
+    {
+      "feature": "days_since_sowing",
+      "shap_importance": 0.054855461777869464
+    },
+    {
+      "feature": "rainfall_14d",
+      "shap_importance": 0.04872951665126959
+    },
+    {
+      "feature": "temp_range",
+      "shap_importance": 0.04759940085924677
+    },
+    {
+      "feature": "temp_max",
+      "shap_importance": 0.045599275290825435
+    },
+    {
+      "feature": "gdd_14d",
+      "shap_importance": 0.04392203994869633
+    },
+    {
+      "feature": "temp_min",
+      "shap_importance": 0.04268429408124277
+    }
+  ]
+}

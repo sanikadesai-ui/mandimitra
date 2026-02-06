@@ -1,0 +1,226 @@
+{
+  "version": "2.0",
+  "risk_classification": {
+    "low_max": 25,
+    "medium_max": 50,
+    "high_min": 50
+  },
+  "soil_thresholds": {
+    "ph_min": 5.5,
+    "ph_max": 8.0,
+    "nitrogen_min_kg_ha": 200,
+    "phosphorus_min_kg_ha": 15,
+    "potassium_min_kg_ha": 110
+  },
+  "crops": {
+    "Soybean": {
+      "aliases": ["Soyabean", "Soya"],
+      "crop_type": "kharif",
+      "total_duration_days": 95,
+      "sowing_window": {"start_month": 6, "end_month": 7},
+      "optimal_conditions": {"temp_optimal": 27, "rainfall_weekly_min": 25, "rainfall_weekly_max": 90},
+      "stages": [
+        {"name": "germination", "start_day": 0, "end_day": 7, "critical": true},
+        {"name": "vegetative", "start_day": 8, "end_day": 35, "critical": false},
+        {"name": "flowering", "start_day": 36, "end_day": 55, "critical": true},
+        {"name": "pod_fill", "start_day": 56, "end_day": 80, "critical": true},
+        {"name": "maturity", "start_day": 81, "end_day": 95, "critical": false}
+      ],
+      "sensitive_windows": [
+        {"stage": "germination", "risk_factor": "drought_stress", "severity": "high", "threshold_rainfall_7d_min": 15},
+        {"stage": "flowering", "risk_factor": "waterlogging", "severity": "high", "threshold_rainfall_7d": 120},
+        {"stage": "flowering", "risk_factor": "heat_stress", "severity": "medium", "threshold_temp_max": 37},
+        {"stage": "pod_fill", "risk_factor": "drought_stress", "severity": "high", "threshold_rainfall_7d_min": 20}
+      ]
+    },
+    "Cotton": {
+      "aliases": ["Kapas"],
+      "crop_type": "kharif",
+      "total_duration_days": 180,
+      "sowing_window": {"start_month": 6, "end_month": 7},
+      "optimal_conditions": {"temp_optimal": 28, "rainfall_weekly_min": 20, "rainfall_weekly_max": 70},
+      "stages": [
+        {"name": "germination", "start_day": 0, "end_day": 10, "critical": true},
+        {"name": "vegetative", "start_day": 11, "end_day": 60, "critical": false},
+        {"name": "flowering", "start_day": 61, "end_day": 110, "critical": true},
+        {"name": "boll_development", "start_day": 111, "end_day": 160, "critical": true},
+        {"name": "maturity", "start_day": 161, "end_day": 180, "critical": false}
+      ],
+      "sensitive_windows": [
+        {"stage": "germination", "risk_factor": "drought_stress", "severity": "high", "threshold_rainfall_7d_min": 12},
+        {"stage": "flowering", "risk_factor": "heat_stress", "severity": "high", "threshold_temp_max": 39},
+        {"stage": "boll_development", "risk_factor": "excess_rain", "severity": "medium", "threshold_rainfall_7d": 120}
+      ]
+    },
+    "Tur": {
+      "aliases": ["Arhar", "Pigeon Pea", "Arhar (Tur/Red Gram)(Whole)"],
+      "crop_type": "kharif",
+      "total_duration_days": 160,
+      "sowing_window": {"start_month": 6, "end_month": 7},
+      "optimal_conditions": {"temp_optimal": 27, "rainfall_weekly_min": 20, "rainfall_weekly_max": 80},
+      "stages": [
+        {"name": "germination", "start_day": 0, "end_day": 10, "critical": true},
+        {"name": "vegetative", "start_day": 11, "end_day": 70, "critical": false},
+        {"name": "flowering", "start_day": 71, "end_day": 110, "critical": true},
+        {"name": "pod_fill", "start_day": 111, "end_day": 145, "critical": true},
+        {"name": "maturity", "start_day": 146, "end_day": 160, "critical": false}
+      ],
+      "sensitive_windows": [
+        {"stage": "flowering", "risk_factor": "heat_stress", "severity": "medium", "threshold_temp_max": 38},
+        {"stage": "pod_fill", "risk_factor": "drought_stress", "severity": "high", "threshold_rainfall_7d_min": 18}
+      ]
+    },
+    "Urad": {
+      "aliases": ["Black Gram", "Urad (Whole)"],
+      "crop_type": "kharif",
+      "total_duration_days": 70,
+      "sowing_window": {"start_month": 6, "end_month": 7},
+      "optimal_conditions": {"temp_optimal": 29, "rainfall_weekly_min": 18, "rainfall_weekly_max": 60},
+      "stages": [
+        {"name": "germination", "start_day": 0, "end_day": 7, "critical": true},
+        {"name": "vegetative", "start_day": 8, "end_day": 30, "critical": false},
+        {"name": "flowering", "start_day": 31, "end_day": 45, "critical": true},
+        {"name": "pod_fill", "start_day": 46, "end_day": 60, "critical": true},
+        {"name": "maturity", "start_day": 61, "end_day": 70, "critical": false}
+      ],
+      "sensitive_windows": [
+        {"stage": "germination", "risk_factor": "drought_stress", "severity": "high", "threshold_rainfall_7d_min": 12},
+        {"stage": "flowering", "risk_factor": "excess_rain", "severity": "medium", "threshold_rainfall_7d": 100}
+      ]
+    },
+    "Onion": {
+      "aliases": ["Onion (Nashik)"],
+      "crop_type": "rabi",
+      "total_duration_days": 150,
+      "sowing_window": {"start_month": 10, "end_month": 12},
+      "optimal_conditions": {"temp_optimal": 22, "rainfall_weekly_min": 10, "rainfall_weekly_max": 40},
+      "stages": [
+        {"name": "germination", "start_day": 0, "end_day": 14, "critical": true},
+        {"name": "vegetative", "start_day": 15, "end_day": 60, "critical": false},
+        {"name": "bulb_initiation", "start_day": 61, "end_day": 90, "critical": true},
+        {"name": "bulb_development", "start_day": 91, "end_day": 130, "critical": true},
+        {"name": "maturity", "start_day": 131, "end_day": 150, "critical": false}
+      ],
+      "sensitive_windows": [
+        {"stage": "germination", "risk_factor": "drought_stress", "severity": "high", "threshold_rainfall_7d_min": 8},
+        {"stage": "bulb_initiation", "risk_factor": "excess_rain", "severity": "high", "threshold_rainfall_7d": 60},
+        {"stage": "bulb_development", "risk_factor": "high_humidity", "severity": "medium", "threshold_humidity": 85}
+      ]
+    },
+    "Wheat": {
+      "aliases": ["Wheat (Lokwan)", "Wheat (Sharbati)"],
+      "crop_type": "rabi",
+      "total_duration_days": 140,
+      "sowing_window": {"start_month": 10, "end_month": 12},
+      "optimal_conditions": {"temp_optimal": 20, "rainfall_weekly_min": 10, "rainfall_weekly_max": 35},
+      "stages": [
+        {"name": "germination", "start_day": 0, "end_day": 10, "critical": true},
+        {"name": "tillering", "start_day": 11, "end_day": 45, "critical": false},
+        {"name": "jointing", "start_day": 46, "end_day": 70, "critical": true},
+        {"name": "heading", "start_day": 71, "end_day": 95, "critical": true},
+        {"name": "grain_fill", "start_day": 96, "end_day": 125, "critical": true},
+        {"name": "maturity", "start_day": 126, "end_day": 140, "critical": false}
+      ],
+      "sensitive_windows": [
+        {"stage": "germination", "risk_factor": "drought_stress", "severity": "high", "threshold_rainfall_7d_min": 10},
+        {"stage": "heading", "risk_factor": "heat_stress", "severity": "high", "threshold_temp_max": 32},
+        {"stage": "grain_fill", "risk_factor": "heat_stress", "severity": "high", "threshold_temp_max": 35}
+      ]
+    },
+    "Jowar": {
+      "aliases": ["Sorghum", "Jowar (Sorghum)"],
+      "crop_type": "kharif",
+      "total_duration_days": 120,
+      "sowing_window": {"start_month": 6, "end_month": 8},
+      "optimal_conditions": {"temp_optimal": 28, "rainfall_weekly_min": 20, "rainfall_weekly_max": 80},
+      "stages": [
+        {"name": "germination", "start_day": 0, "end_day": 10, "critical": true},
+        {"name": "vegetative", "start_day": 11, "end_day": 45, "critical": false},
+        {"name": "flowering", "start_day": 46, "end_day": 70, "critical": true},
+        {"name": "grain_fill", "start_day": 71, "end_day": 100, "critical": true},
+        {"name": "maturity", "start_day": 101, "end_day": 120, "critical": false}
+      ],
+      "sensitive_windows": [
+        {"stage": "germination", "risk_factor": "drought_stress", "severity": "high", "threshold_rainfall_7d_min": 15},
+        {"stage": "flowering", "risk_factor": "drought_stress", "severity": "high", "threshold_rainfall_7d_min": 20}
+      ]
+    },
+    "Bajra": {
+      "aliases": ["Pearl Millet", "Bajra (Pearl Millet/Cumbu)"],
+      "crop_type": "kharif",
+      "total_duration_days": 90,
+      "sowing_window": {"start_month": 6, "end_month": 8},
+      "optimal_conditions": {"temp_optimal": 30, "rainfall_weekly_min": 15, "rainfall_weekly_max": 60},
+      "stages": [
+        {"name": "germination", "start_day": 0, "end_day": 7, "critical": true},
+        {"name": "vegetative", "start_day": 8, "end_day": 35, "critical": false},
+        {"name": "flowering", "start_day": 36, "end_day": 55, "critical": true},
+        {"name": "grain_fill", "start_day": 56, "end_day": 78, "critical": true},
+        {"name": "maturity", "start_day": 79, "end_day": 90, "critical": false}
+      ],
+      "sensitive_windows": [
+        {"stage": "germination", "risk_factor": "drought_stress", "severity": "medium", "threshold_rainfall_7d_min": 10},
+        {"stage": "flowering", "risk_factor": "excess_rain", "severity": "medium", "threshold_rainfall_7d": 100}
+      ]
+    },
+    "Maize": {
+      "aliases": ["Corn", "Makka"],
+      "crop_type": "kharif",
+      "total_duration_days": 110,
+      "sowing_window": {"start_month": 6, "end_month": 8},
+      "optimal_conditions": {"temp_optimal": 26, "rainfall_weekly_min": 25, "rainfall_weekly_max": 80},
+      "stages": [
+        {"name": "germination", "start_day": 0, "end_day": 10, "critical": true},
+        {"name": "vegetative", "start_day": 11, "end_day": 50, "critical": false},
+        {"name": "tasseling", "start_day": 51, "end_day": 65, "critical": true},
+        {"name": "silking", "start_day": 66, "end_day": 75, "critical": true},
+        {"name": "grain_fill", "start_day": 76, "end_day": 95, "critical": true},
+        {"name": "maturity", "start_day": 96, "end_day": 110, "critical": false}
+      ],
+      "sensitive_windows": [
+        {"stage": "germination", "risk_factor": "drought_stress", "severity": "high", "threshold_rainfall_7d_min": 18},
+        {"stage": "tasseling", "risk_factor": "heat_stress", "severity": "high", "threshold_temp_max": 38},
+        {"stage": "silking", "risk_factor": "drought_stress", "severity": "high", "threshold_rainfall_7d_min": 25}
+      ]
+    },
+    "Gram": {
+      "aliases": ["Bengal Gram", "Chana", "Bengal Gram (Gram)(Whole)"],
+      "crop_type": "rabi",
+      "total_duration_days": 110,
+      "sowing_window": {"start_month": 10, "end_month": 11},
+      "optimal_conditions": {"temp_optimal": 22, "rainfall_weekly_min": 10, "rainfall_weekly_max": 35},
+      "stages": [
+        {"name": "germination", "start_day": 0, "end_day": 10, "critical": true},
+        {"name": "vegetative", "start_day": 11, "end_day": 40, "critical": false},
+        {"name": "flowering", "start_day": 41, "end_day": 65, "critical": true},
+        {"name": "pod_fill", "start_day": 66, "end_day": 95, "critical": true},
+        {"name": "maturity", "start_day": 96, "end_day": 110, "critical": false}
+      ],
+      "sensitive_windows": [
+        {"stage": "germination", "risk_factor": "excess_moisture", "severity": "high", "threshold_rainfall_7d": 50},
+        {"stage": "flowering", "risk_factor": "frost", "severity": "high", "threshold_temp_min": 5},
+        {"stage": "pod_fill", "risk_factor": "heat_stress", "severity": "medium", "threshold_temp_max": 35}
+      ]
+    },
+    "Tomato": {
+      "aliases": ["Tamatar"],
+      "crop_type": "multi_season",
+      "total_duration_days": 120,
+      "sowing_window": {"start_month": 1, "end_month": 12},
+      "optimal_conditions": {"temp_optimal": 24, "rainfall_weekly_min": 15, "rainfall_weekly_max": 50},
+      "stages": [
+        {"name": "germination", "start_day": 0, "end_day": 10, "critical": true},
+        {"name": "vegetative", "start_day": 11, "end_day": 35, "critical": false},
+        {"name": "flowering", "start_day": 36, "end_day": 55, "critical": true},
+        {"name": "fruit_set", "start_day": 56, "end_day": 75, "critical": true},
+        {"name": "fruit_development", "start_day": 76, "end_day": 100, "critical": false},
+        {"name": "harvest", "start_day": 101, "end_day": 120, "critical": false}
+      ],
+      "sensitive_windows": [
+        {"stage": "germination", "risk_factor": "cold_stress", "severity": "high", "threshold_temp_min": 12},
+        {"stage": "flowering", "risk_factor": "heat_stress", "severity": "high", "threshold_temp_max": 35},
+        {"stage": "fruit_set", "risk_factor": "excess_rain", "severity": "medium", "threshold_rainfall_7d": 80}
+      ]
+    }
+  }
+}

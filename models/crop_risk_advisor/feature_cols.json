@@ -1,0 +1,36 @@
+{
+  "features": [
+    "crop",
+    "district",
+    "stage",
+    "is_critical_stage",
+    "days_since_sowing",
+    "stage_progress",
+    "sowing_month",
+    "current_month",
+    "rainfall_3d",
+    "rainfall_7d",
+    "rainfall_14d",
+    "rainfall_max_day",
+    "rainfall_days_7d",
+    "temp_max",
+    "temp_min",
+    "temp_mean",
+    "temp_range",
+    "temp_std",
+    "humidity",
+    "humidity_max",
+    "hot_days_7d",
+    "cold_days_7d",
+    "wet_days_7d",
+    "gdd_7d",
+    "gdd_14d",
+    "vpd_7d",
+    "drought_stress_7d"
+  ],
+  "categorical": [
+    "crop",
+    "district",
+    "stage"
+  ]
+}
